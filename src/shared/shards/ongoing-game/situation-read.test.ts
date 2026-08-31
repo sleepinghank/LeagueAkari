@@ -1,15 +1,90 @@
 import type {
   AggregatedAnalysis,
-  AggregatedChampionAnalysis
+  AggregatedChampionAnalysis,
+  AggregatedJungleAnalysis
 } from '@shared/data-adapter/analysis/player'
 import type { RankedStats } from '@shared/types/league-client/ranked'
 import { describe, expect, it } from 'vitest'
 
 import {
+  type JunglerMatchupReport,
+  type LanerMatchupReport,
   type SituationReadPlayerInput,
   computeSituationRead,
   extractSoloRankedEntry
 } from './situation-read'
+
+function createJungleAnalysis(options: {
+  gamesAnalyzed: number
+  level3GankRate?: number
+  level4GankRate?: number
+  topZonePercentage?: number
+  midZonePercentage?: number
+  botZonePercentage?: number
+}): AggregatedJungleAnalysis {
+  return {
+    gamesAnalyzed: options.gamesAnalyzed,
+    topZoneWeightSum: 0,
+    midZoneWeightSum: 0,
+    botZoneWeightSum: 0,
+    totalZoneWeightSum: 0,
+    avgTopZonePercentage: options.topZonePercentage ?? 0,
+    avgMidZonePercentage: options.midZonePercentage ?? 0,
+    avgBotZonePercentage: options.botZonePercentage ?? 0,
+    totalTopGanks: 0,
+    totalMidGanks: 0,
+    totalBotGanks: 0,
+    avgTopGanks: 0,
+    avgMidGanks: 0,
+    avgBotGanks: 0,
+    objectives: {
+      firstDragonRate: 0,
+      soloDragonRate: 0,
+      avgDragons: 0,
+      avgFirstDragonTime: null,
+      avgVoidgrubs: 0,
+      avgFirstVoidgrubTime: null,
+      avgHeralds: 0,
+      avgFirstHeraldTime: null,
+      avgBarons: 0,
+      avgFirstBaronTime: null
+    },
+    firstClearCamp: {
+      blue: { red: 0, blue: 0, wolves: 0, raptors: 0 },
+      red: { red: 0, blue: 0, wolves: 0, raptors: 0 },
+      blueInvade: { red: 0, blue: 0, wolves: 0, raptors: 0 },
+      redInvade: { red: 0, blue: 0, wolves: 0, raptors: 0 },
+      blueGames: 0,
+      redGames: 0
+    },
+    earlyGank: {
+      level3GankRate: options.level3GankRate ?? 0,
+      level3GankCount: 0,
+      level3KillPositions: [],
+      level4GankRate: options.level4GankRate ?? 0,
+      level4GankCount: 0,
+      level4KillPositions: [],
+      byTeam: {
+        blueGames: 0,
+        redGames: 0,
+        blueLevel3GankRate: 0,
+        blueLevel3GankCount: 0,
+        blueLevel3KillPositions: [],
+        blueLevel4GankRate: 0,
+        blueLevel4GankCount: 0,
+        blueLevel4KillPositions: [],
+        redLevel3GankRate: 0,
+        redLevel3GankCount: 0,
+        redLevel3KillPositions: [],
+        redLevel4GankRate: 0,
+        redLevel4GankCount: 0,
+        redLevel4KillPositions: []
+      }
+    },
+    gankPositions: [],
+    minutePositions: []
+  }
+}
 
 function createAnalysis(options: {
   count: number
@@ -21,6 +96,8 @@ function createAnalysis(options: {
   losingStreak?: number
   /** championId → 使用场数 */
   champions?: Record<number, number>
+  jungle?: AggregatedJungleAnalysis | null
+  avgEarlyDeathsWithEnemyJunglerInvolved?: number | null
 }): AggregatedAnalysis {
   const streaks = {
     winningStreak: options.winningStreak ?? 0,
@@ -62,7 +139,12 @@ function createAnalysis(options: {
       avgEnemyMissingPings: null,
       avgPings: null
     },
-    details: null,
+    details:
+      options.avgEarlyDeathsWithEnemyJunglerInvolved === undefined
+        ? null
+        : {
+            avgEarlyDeathsWithEnemyJunglerInvolved: options.avgEarlyDeathsWithEnemyJunglerInvolved
+          },
     akariScore: {
       kdaScore: 0,
       winRateScore: 0,
@@ -118,7 +200,7 @@ function createAnalysis(options: {
     spells: { flashOnD: 0, flashOnF: 0 },
     positions: null,
     champions: createChampions(options.champions),
-    jungle: null,
+    jungle: options.jungle ?? null,
     detailsCount: 0
   }
 }
@@ -398,10 +480,13 @@ describe('computeSituationRead matchup report', () => {
     selfPuuid?: string | null
     positionAssignments?: Record<string, string>
     enemyAnalysis?: AggregatedAnalysis | null
+    enemyJungleAnalysis?: AggregatedAnalysis | null
     championRoles?: Record<number, string[]>
+    premadeGroups?: string[][]
+    players?: SituationReadPlayerInput[]
   }) {
     return {
-      players: [
+      players: options.players ?? [
         createPlayer('me', { tier: 'GOLD', division: 'IV' }, null, 'TEAM-100'),
         createPlayer('ally', { tier: 'GOLD', division: 'IV' }, null, 'TEAM-100'),
         createPlayer(
@@ -410,17 +495,46 @@ describe('computeSituationRead matchup report', () => {
           options.enemyAnalysis === undefined ? null : options.enemyAnalysis,
           'TEAM-200'
         ),
-        createPlayer('enemy-top', { tier: 'GOLD', division: 'IV' }, null, 'TEAM-200')
+        createPlayer('enemy-top', { tier: 'GOLD', division: 'IV' }, null, 'TEAM-200'),
+        createPlayer(
+          'enemy-jungle',
+          { tier: 'GOLD', division: 'IV' },
+          options.enemyJungleAnalysis === undefined ? null : options.enemyJungleAnalysis,
+          'TEAM-200'
+        )
       ],
       matchup: {
         selfPuuid: options.selfPuuid === undefined ? 'me' : options.selfPuuid,
         positionAssignments:
           options.positionAssignments === undefined
-            ? { me: 'MIDDLE', ally: 'TOP', 'enemy-mid': 'MIDDLE', 'enemy-top': 'TOP' }
+            ? {
+                me: 'MIDDLE',
+                ally: 'TOP',
+                'enemy-mid': 'MIDDLE',
+                'enemy-top': 'TOP',
+                'enemy-jungle': 'JUNGLE'
+              }
             : options.positionAssignments,
-        championRoles: options.championRoles ?? {}
+        championRoles: options.championRoles ?? {},
+        premadeGroups: options.premadeGroups ?? []
       }
     }
+  }
+
+  function asLanerReport(result: ReturnType<typeof computeSituationRead>): LanerMatchupReport {
+    const report = result.matchupReport
+    if (report?.perspective !== 'laner') {
+      throw new Error('Expected a laner matchup report')
+    }
+    return report
+  }
+
+  function asJunglerReport(result: ReturnType<typeof computeSituationRead>): JunglerMatchupReport {
+    const report = result.matchupReport
+    if (report?.perspective !== 'jungler') {
+      throw new Error('Expected a jungler matchup report')
+    }
+    return report
   }
 
   it('identifies the same-position enemy player as the matchup opponent', () => {
@@ -428,7 +542,7 @@ describe('computeSituationRead matchup report', () => {
 
     expect(result.matchupReport).not.toBeNull()
     expect(result.matchupReport!.selfPosition).toBe('MIDDLE')
-    expect(result.matchupReport!.opponent).toMatchObject({
+    expect(asLanerReport(result).opponent).toMatchObject({
       puuid: 'enemy-mid',
       teamIdentifier: 'TEAM-200',
       rankedSolo: { tier: 'DIAMOND', division: 'II' },
@@ -444,7 +558,7 @@ describe('computeSituationRead matchup report', () => {
       })
     )
 
-    expect(result.matchupReport!.opponent).toMatchObject({
+    expect(asLanerReport(result).opponent).toMatchObject({
       recentGameCount: 20,
       recentWinRate: 0.55
     })
@@ -455,11 +569,19 @@ describe('computeSituationRead matchup report', () => {
     ['when the self player is not in any team', { selfPuuid: 'stranger' }],
     ['without a position assignment for the self player', { positionAssignments: {} }],
     ['when the self position is NONE', { positionAssignments: { me: 'NONE' } }],
-    ['when the self position is FILL', { positionAssignments: { me: 'FILL' } }],
-    ['when no enemy shares the position', { positionAssignments: { me: 'UTILITY' } }]
+    ['when the self position is FILL', { positionAssignments: { me: 'FILL' } }]
   ])('hides the matchup report %s', (_, overrides) => {
     const result = computeSituationRead(createMatchupOptions(overrides))
     expect(result.matchupReport).toBeNull()
+  })
+
+  it('keeps the report without a same-position opponent but nulls the opponent', () => {
+    const result = computeSituationRead(
+      createMatchupOptions({ positionAssignments: { me: 'UTILITY' } })
+    )
+    expect(result.matchupReport).not.toBeNull()
+    expect(result.matchupReport!.selfPosition).toBe('UTILITY')
+    expect(asLanerReport(result).opponent).toBeNull()
   })
 
   it('omits the matchup report when no matchup context is provided', () => {
@@ -470,7 +592,7 @@ describe('computeSituationRead matchup report', () => {
   describe('recent form precaution rule', () => {
     function getPrecautions(analysis: AggregatedAnalysis) {
       const result = computeSituationRead(createMatchupOptions({ enemyAnalysis: analysis }))
-      return result.matchupReport!.opponent!.precautions
+      return asLanerReport(result).opponent!.precautions
     }
 
     it.each([
@@ -521,7 +643,7 @@ describe('computeSituationRead matchup report', () => {
 
     it('shows no precautions without an opponent analysis', () => {
       const result = computeSituationRead(createMatchupOptions({ enemyAnalysis: null }))
-      expect(result.matchupReport!.opponent!.precautions).toEqual([])
+      expect(asLanerReport(result).opponent!.precautions).toEqual([])
     })
   })
 
@@ -541,8 +663,8 @@ describe('computeSituationRead matchup report', () => {
         })
       )
 
-      return result
-        .matchupReport!.opponent!.precautions.filter((p) => p.kind === 'champion-archetype')
+      return asLanerReport(result)
+        .opponent!.precautions.filter((p) => p.kind === 'champion-archetype')
         .map((p) => (p as { archetype: string }).archetype)
     }
 
@@ -576,6 +698,307 @@ describe('computeSituationRead matchup report', () => {
           championRoles: { 238: ['Assassin', 'Mage'], 55: ['Mage'] }
         })
       ).toEqual(['Assassin', 'Mage'])
+    })
+  })
+
+  describe('enemy jungle threat section', () => {
+    function getJungleThreat(options: {
+      enemyJungleAnalysis?: AggregatedAnalysis | null
+      positionAssignments?: Record<string, string>
+      premadeGroups?: string[][]
+    }) {
+      const result = computeSituationRead(
+        createMatchupOptions({
+          enemyJungleAnalysis:
+            options.enemyJungleAnalysis === undefined ? null : options.enemyJungleAnalysis,
+          positionAssignments: options.positionAssignments,
+          premadeGroups: options.premadeGroups
+        })
+      )
+
+      return asLanerReport(result).jungleThreat
+    }
+
+    it('targets the enemy player assigned to the jungle position', () => {
+      const jungleThreat = getJungleThreat({})
+      expect(jungleThreat).toMatchObject({ puuid: 'enemy-jungle', teamIdentifier: 'TEAM-200' })
+    })
+
+    it('omits the section when no enemy is assigned to the jungle position', () => {
+      const jungleThreat = getJungleThreat({
+        positionAssignments: { me: 'MIDDLE', 'enemy-mid': 'MIDDLE', 'enemy-jungle': 'FILL' }
+      })
+      expect(jungleThreat).toBeNull()
+    })
+
+    it.each([
+      // 描述, 打野聚合, 期望降级标志, 期望预警
+      [
+        'flags a high level 3 gank rate',
+        createJungleAnalysis({ gamesAnalyzed: 10, level3GankRate: 0.6, level4GankRate: 0.2 }),
+        false,
+        [{ kind: 'early-gank', level3GankRate: 0.6, level4GankRate: 0.2 }]
+      ],
+      [
+        'flags a high level 4 gank rate',
+        createJungleAnalysis({ gamesAnalyzed: 10, level3GankRate: 0.2, level4GankRate: 0.5 }),
+        false,
+        [{ kind: 'early-gank', level3GankRate: 0.2, level4GankRate: 0.5 }]
+      ],
+      [
+        'ignores average early gank rates',
+        createJungleAnalysis({ gamesAnalyzed: 10, level3GankRate: 0.4, level4GankRate: 0.4 }),
+        false,
+        []
+      ],
+      [
+        'flags the preferred lane when I am elsewhere',
+        createJungleAnalysis({ gamesAnalyzed: 10, topZonePercentage: 0.5, midZonePercentage: 0.3 }),
+        false,
+        [{ kind: 'preferred-lane', lane: 'TOP' }]
+      ],
+      [
+        'ignores an even lane spread',
+        createJungleAnalysis({
+          gamesAnalyzed: 10,
+          topZonePercentage: 0.34,
+          midZonePercentage: 0.33,
+          botZonePercentage: 0.33
+        }),
+        false,
+        []
+      ],
+      [
+        'combines the early gank warning with the preferred lane',
+        createJungleAnalysis({
+          gamesAnalyzed: 10,
+          level3GankRate: 0.7,
+          topZonePercentage: 0.5,
+          midZonePercentage: 0.3
+        }),
+        false,
+        [
+          { kind: 'early-gank', level3GankRate: 0.7, level4GankRate: 0 },
+          { kind: 'preferred-lane', lane: 'TOP' }
+        ]
+      ],
+      [
+        'degrades with too few jungle games',
+        createJungleAnalysis({ gamesAnalyzed: 2, level3GankRate: 1.0 }),
+        true,
+        []
+      ]
+    ])('%s', (_, jungle, expectedInsufficient, expectedPrecautions) => {
+      const jungleThreat = getJungleThreat({
+        enemyJungleAnalysis: createAnalysis({ count: 10, winRate: 0.5, jungle })
+      })
+
+      expect(jungleThreat!.insufficientData).toBe(expectedInsufficient)
+      expect(jungleThreat!.precautions).toEqual(expectedPrecautions)
+    })
+
+    it('degrades without any jungle sample', () => {
+      const jungleThreat = getJungleThreat({
+        enemyJungleAnalysis: createAnalysis({ count: 10, winRate: 0.5, jungle: null })
+      })
+      expect(jungleThreat!.insufficientData).toBe(true)
+      expect(jungleThreat!.precautions).toEqual([])
+    })
+
+    it('is more explicit when the preferred lane is mine', () => {
+      // 默认场景我在 MIDDLE
+      const jungleThreat = getJungleThreat({
+        enemyJungleAnalysis: createAnalysis({
+          count: 10,
+          winRate: 0.5,
+          jungle: createJungleAnalysis({ gamesAnalyzed: 10, midZonePercentage: 0.6 })
+        })
+      })
+      expect(jungleThreat!.precautions).toEqual([{ kind: 'targets-self', lane: 'MIDDLE' }])
+    })
+
+    it.each([
+      ['BOTTOM', 'BOTTOM'],
+      ['UTILITY', 'BOTTOM']
+    ])('maps the %s position to the bottom lane preference', (selfPosition, expectedLane) => {
+      const jungleThreat = getJungleThreat({
+        positionAssignments: {
+          me: selfPosition,
+          ally: 'TOP',
+          'enemy-mid': 'MIDDLE',
+          'enemy-top': 'TOP',
+          'enemy-jungle': 'JUNGLE'
+        },
+        enemyJungleAnalysis: createAnalysis({
+          count: 10,
+          winRate: 0.5,
+          jungle: createJungleAnalysis({ gamesAnalyzed: 10, botZonePercentage: 0.6 })
+        })
+      })
+      expect(jungleThreat!.precautions).toEqual([{ kind: 'targets-self', lane: expectedLane }])
+    })
+
+    describe('premade link rule', () => {
+      it('links the matchup opponent with the enemy jungler in one premade group', () => {
+        const jungleThreat = getJungleThreat({
+          premadeGroups: [
+            ['enemy-mid', 'enemy-jungle'],
+            ['me', 'ally']
+          ]
+        })
+        expect(jungleThreat!.precautions).toEqual([{ kind: 'premade-link' }])
+      })
+
+      it('still links while the jungler data is insufficient', () => {
+        const jungleThreat = getJungleThreat({
+          premadeGroups: [['enemy-mid', 'enemy-jungle']]
+        })
+        expect(jungleThreat!.insufficientData).toBe(true)
+        expect(jungleThreat!.precautions).toEqual([{ kind: 'premade-link' }])
+      })
+
+      it.each([
+        ['when they are in separate groups', [['enemy-mid'], ['enemy-jungle']]],
+        [
+          'when only others are premade',
+          [
+            ['me', 'ally'],
+            ['enemy-top', 'enemy-jungle']
+          ]
+        ]
+      ])('does not link %s', (_, premadeGroups) => {
+        const jungleThreat = getJungleThreat({ premadeGroups })
+        expect(jungleThreat!.precautions).toEqual([])
+      })
+
+      it('does not link without a matchup opponent', () => {
+        const jungleThreat = getJungleThreat({
+          positionAssignments: { me: 'UTILITY', 'enemy-jungle': 'JUNGLE' },
+          premadeGroups: [['enemy-mid', 'enemy-jungle']]
+        })
+        expect(jungleThreat!.precautions).toEqual([])
+      })
+    })
+  })
+
+  describe('jungler perspective', () => {
+    function getJunglerReport(options: { players: SituationReadPlayerInput[] }) {
+      return asJunglerReport(
+        computeSituationRead({
+          players: options.players,
+          matchup: {
+            selfPuuid: 'me',
+            positionAssignments: {
+              me: 'JUNGLE',
+              ally: 'TOP',
+              'enemy-top': 'TOP',
+              'enemy-mid': 'MIDDLE',
+              'enemy-bot': 'BOTTOM',
+              'enemy-sup': 'UTILITY',
+              'enemy-jungle': 'JUNGLE'
+            },
+            championRoles: {},
+            premadeGroups: []
+          }
+        })
+      )
+    }
+
+    function createJunglerLobbyPlayers(
+      details: Record<string, number | null>
+    ): SituationReadPlayerInput[] {
+      return [
+        createPlayer('me', { tier: 'GOLD', division: 'IV' }, null, 'TEAM-100'),
+        createPlayer('ally', { tier: 'GOLD', division: 'IV' }, null, 'TEAM-100'),
+        createPlayer(
+          'enemy-top',
+          { tier: 'GOLD', division: 'IV' },
+          createAnalysis({
+            count: 10,
+            winRate: 0.5,
+            avgEarlyDeathsWithEnemyJunglerInvolved: details['enemy-top'] ?? null
+          }),
+          'TEAM-200'
+        ),
+        createPlayer(
+          'enemy-mid',
+          { tier: 'GOLD', division: 'IV' },
+          createAnalysis({
+            count: 10,
+            winRate: 0.5,
+            avgEarlyDeathsWithEnemyJunglerInvolved: details['enemy-mid'] ?? null
+          }),
+          'TEAM-200'
+        ),
+        createPlayer(
+          'enemy-bot',
+          { tier: 'GOLD', division: 'IV' },
+          createAnalysis({
+            count: 10,
+            winRate: 0.5,
+            avgEarlyDeathsWithEnemyJunglerInvolved: details['enemy-bot'] ?? null
+          }),
+          'TEAM-200'
+        ),
+        createPlayer(
+          'enemy-sup',
+          { tier: 'GOLD', division: 'IV' },
+          createAnalysis({
+            count: 10,
+            winRate: 0.5,
+            avgEarlyDeathsWithEnemyJunglerInvolved: details['enemy-sup'] ?? null
+          }),
+          'TEAM-200'
+        ),
+        createPlayer('enemy-jungle', { tier: 'GOLD', division: 'IV' }, null, 'TEAM-200')
+      ]
+    }
+
+    it('replaces the matchup opponent with ranked enemy gank targets', () => {
+      const report = getJunglerReport({
+        players: createJunglerLobbyPlayers({
+          'enemy-top': 0.8,
+          'enemy-mid': 1.2,
+          'enemy-bot': null,
+          'enemy-sup': 0.1
+        })
+      })
+
+      expect(report).toMatchObject({ perspective: 'jungler', selfPosition: 'JUNGLE' })
+      expect(report.gankTargets.map((target) => [target.puuid, target.earlyGankDeaths])).toEqual([
+        ['enemy-mid', 1.2],
+        ['enemy-top', 0.8],
+        ['enemy-sup', 0.1],
+        ['enemy-bot', null]
+      ])
+    })
+
+    it('describes each target with its position and team', () => {
+      const report = getJunglerReport({
+        players: createJunglerLobbyPlayers({ 'enemy-mid': 0.5 })
+      })
+
+      expect(report.gankTargets.find((target) => target.puuid === 'enemy-mid')).toMatchObject({
+        position: 'MIDDLE',
+        teamIdentifier: 'TEAM-200'
+      })
+    })
+
+    it('keeps insufficient-data targets in input order behind ranked ones', () => {
+      const report = getJunglerReport({
+        players: createJunglerLobbyPlayers({
+          'enemy-top': null,
+          'enemy-bot': null,
+          'enemy-mid': 0.4
+        })
+      })
+
+      expect(report.gankTargets.map((target) => target.puuid)).toEqual([
+        'enemy-mid',
+        'enemy-top',
+        'enemy-bot',
+        'enemy-sup'
+      ])
     })
   })
 })

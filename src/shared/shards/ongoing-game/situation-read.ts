@@ -1,4 +1,7 @@
-import type { AggregatedAnalysis } from '@shared/data-adapter/analysis/player'
+import type {
+  AggregatedAnalysis,
+  AggregatedJungleAnalysis
+} from '@shared/data-adapter/analysis/player'
 import type { RankedStats } from '@shared/types/league-client/ranked'
 
 /**
@@ -10,8 +13,10 @@ import type { RankedStats } from '@shared/types/league-client/ranked'
  * - 样本不足 5 场时修正按样本量向基线收缩；
  * - 无段位且无近期战绩时输出"数据不足"哨兵（score 为 null）。
  *
- * 对位专报（Matchup Report）：自动识别"我"的位置与同位置敌方对手，
- * 产出最近表现摘要与模板化注意事项（近期状态 + 英雄粗分类规则）。
+ * 对位专报（Matchup Report）：自动识别"我"的位置并按视角产出定向分析——
+ * - 分路玩家：同位置对手的最近表现与模板化注意事项（近期状态 + 英雄粗分类），
+ *   外加敌方打野威胁小节（3 / 4 级 gank 率、偏好路、预组队联动）；
+ * - 打野玩家：对位部分替换为敌方各路易被抓排名（被 gank 敏感度特征）。
  */
 
 /** 未定级（无单双排段位）玩家的基线 */
@@ -108,6 +113,33 @@ export const MATCHUP_ARCHETYPE_ORDER = [
   'Support'
 ] as const
 
+/** 敌方打野威胁：低于该打野样本数时小节显示降级状态而非结论 */
+export const JUNGLE_THREAT_MIN_GAMES = 3
+
+/** 敌方打野 3 / 4 级 gank 率达到该值时触发早期 gank 预警 */
+export const JUNGLE_THREAT_EARLY_GANK_RATE = 0.5
+
+/** 敌方打野在某一路的活动占比达到该值时视为"偏好 gank 该路" */
+export const JUNGLE_THREAT_PREFERRED_LANE_RATE = 0.45
+
+/** 对位专报的路维度：下路双人组（BOTTOM / UTILITY）共享同一路 */
+export type MatchupLane = 'TOP' | 'MIDDLE' | 'BOTTOM'
+
+/** 位置 → 路映射；JUNGLE 不参与（打野视角下无此概念） */
+export const MATCHUP_POSITION_TO_LANE: Record<string, MatchupLane> = {
+  TOP: 'TOP',
+  MIDDLE: 'MIDDLE',
+  BOTTOM: 'BOTTOM',
+  UTILITY: 'BOTTOM'
+}
+
+/** 路 → 敌方打野聚合中对应的活动占比字段 */
+const LANE_ZONE_PERCENTAGE_KEYS: Record<MatchupLane, keyof AggregatedJungleAnalysis> = {
+  TOP: 'avgTopZonePercentage',
+  MIDDLE: 'avgMidZonePercentage',
+  BOTTOM: 'avgBotZonePercentage'
+}
+
 export interface SituationReadRankedSolo {
   tier: string
   division: string
@@ -152,12 +184,55 @@ export interface MatchupReportOpponent {
   precautions: MatchupPrecaution[]
 }
 
-export interface MatchupReport {
-  /** 我的位置（TOP / JUNGLE / MIDDLE / BOTTOM / UTILITY） */
-  selfPosition: string
-  /** 同位置敌方对手；敌方无同位置玩家时为 null */
-  opponent: MatchupReportOpponent | null
+/** 敌方打野威胁小节的注意事项 */
+export type MatchupJunglePrecaution =
+  /** 3 / 4 级 gank 率高，前几分钟压线需做视野 */
+  | { kind: 'early-gank'; level3GankRate: number; level4GankRate: number }
+  /** 偏好 gank 某一路（非我所在路） */
+  | { kind: 'preferred-lane'; lane: MatchupLane }
+  /** 偏好 gank 我所在的路，预警更明确 */
+  | { kind: 'targets-self'; lane: MatchupLane }
+  /** 对位者与敌方打野是预组队，警惕联动 gank */
+  | { kind: 'premade-link' }
+
+export interface MatchupJungleThreat {
+  puuid: string
+  teamIdentifier: string
+  /** 打野样本低于阈值时为 true：小节显示降级状态，不产出行为类预警 */
+  insufficientData: boolean
+  precautions: MatchupJunglePrecaution[]
 }
+
+/** 打野视角下"敌方各路谁容易被抓"的单个目标 */
+export interface MatchupGankTarget {
+  puuid: string
+  teamIdentifier: string
+  /** 目标位置（TOP / MIDDLE / BOTTOM / UTILITY） */
+  position: string
+  /** 场均早期被敌方打野参与的死亡；无 details 数据为 null（数据不足） */
+  earlyGankDeaths: number | null
+}
+
+/** 分路玩家视角：同位置对手 + 敌方打野威胁小节 */
+export interface LanerMatchupReport {
+  perspective: 'laner'
+  /** 我的位置（TOP / MIDDLE / BOTTOM / UTILITY） */
+  selfPosition: string
+  /** 同位置敌方对手；敌方无同位置玩家时为 null（对位者块隐藏） */
+  opponent: MatchupReportOpponent | null
+  /** 敌方打野威胁；敌方无打野指派时为 null（小节隐藏） */
+  jungleThreat: MatchupJungleThreat | null
+}
+
+/** 打野视角：对位部分替换为敌方各路易被抓排名，指引反蹲与 gank 方向 */
+export interface JunglerMatchupReport {
+  perspective: 'jungler'
+  selfPosition: 'JUNGLE'
+  /** 敌方各路目标，按场均早期被 gank 死亡降序；数据不足者排在末尾（保持输入顺序） */
+  gankTargets: MatchupGankTarget[]
+}
+
+export type MatchupReport = LanerMatchupReport | JunglerMatchupReport
 
 /** 对位专报的计算上下文 */
 export interface MatchupReadContext {
@@ -167,6 +242,8 @@ export interface MatchupReadContext {
   positionAssignments: Record<string, string>
   /** championId → LCU 英雄数据自带的 roles 粗分类 */
   championRoles: Record<number, readonly string[]>
+  /** 既有预组队推断结果：每组为一路预组队的 puuid 集合 */
+  premadeGroups: string[][]
 }
 
 export interface SituationRead {
@@ -220,8 +297,10 @@ export function computeSituationRead(options: {
 }
 
 /**
- * 对位专报：识别"我"的位置与同位置敌方对手，产出最近表现摘要与模板化注意事项。
- * 身份、位置或对位者无法识别时返回 null（渲染层隐藏专报小节）。
+ * 对位专报：识别"我"的位置并按视角产出定向分析。
+ * - 分路玩家：同位置对手的最近表现与注意事项 + 敌方打野威胁小节；
+ * - 打野玩家：对位部分替换为敌方各路易被抓排名；
+ * 身份或位置无法识别时返回 null（渲染层隐藏专报小节）。
  */
 function computeMatchupReport(
   players: SituationReadPlayerInput[],
@@ -241,27 +320,160 @@ function computeMatchupReport(
     return null
   }
 
-  const opponent = players.find(
-    (player) =>
-      player.teamIdentifier !== self.teamIdentifier &&
-      context.positionAssignments[player.puuid] === selfPosition
+  const enemies = players.filter((player) => player.teamIdentifier !== self.teamIdentifier)
+
+  if (selfPosition === 'JUNGLE') {
+    return {
+      perspective: 'jungler',
+      selfPosition,
+      gankTargets: computeGankTargets(enemies, context.positionAssignments)
+    }
+  }
+
+  const opponent = enemies.find(
+    (player) => context.positionAssignments[player.puuid] === selfPosition
   )
 
-  if (!opponent) {
+  return {
+    perspective: 'laner',
+    selfPosition,
+    opponent: opponent
+      ? {
+          puuid: opponent.puuid,
+          teamIdentifier: opponent.teamIdentifier,
+          rankedSolo: opponent.rankedSolo,
+          recentGameCount: opponent.analysis?.count ?? null,
+          recentWinRate: opponent.analysis ? opponent.analysis.summary.winRate : null,
+          precautions: computeMatchupPrecautions(opponent.analysis, context.championRoles)
+        }
+      : null,
+    jungleThreat: computeJungleThreat(enemies, context, selfPosition, opponent ?? null)
+  }
+}
+
+/**
+ * 打野视角：敌方各路目标按场均早期被敌方打野参与的死亡降序排列。
+ * 数据不足（无 details）的目标排在末尾并保持输入顺序，渲染层显示降级状态。
+ */
+function computeGankTargets(
+  enemies: SituationReadPlayerInput[],
+  positionAssignments: Record<string, string>
+): MatchupGankTarget[] {
+  const targets = enemies
+    .map((player) => {
+      const position = positionAssignments[player.puuid] ?? ''
+      if (!(position in MATCHUP_POSITION_TO_LANE)) {
+        return null
+      }
+
+      return {
+        puuid: player.puuid,
+        teamIdentifier: player.teamIdentifier,
+        position,
+        earlyGankDeaths: player.analysis?.details?.avgEarlyDeathsWithEnemyJunglerInvolved ?? null
+      }
+    })
+    .filter((target): target is MatchupGankTarget => target !== null)
+
+  return targets.toSorted((a, b) => {
+    if (a.earlyGankDeaths === null && b.earlyGankDeaths === null) return 0
+    if (a.earlyGankDeaths === null) return 1
+    if (b.earlyGankDeaths === null) return -1
+    return b.earlyGankDeaths - a.earlyGankDeaths
+  })
+}
+
+/**
+ * 敌方打野威胁小节：3 / 4 级 gank 率、偏好路与预组队联动的模板化预警。
+ * 打野样本不足时输出降级状态（insufficientData），不产出行为类预警；
+ * 预组队联动不依赖打野样本，降级状态下仍然生效。
+ */
+function computeJungleThreat(
+  enemies: SituationReadPlayerInput[],
+  context: MatchupReadContext,
+  selfPosition: string,
+  opponent: SituationReadPlayerInput | null
+): MatchupJungleThreat | null {
+  const enemyJungler = enemies.find(
+    (player) => context.positionAssignments[player.puuid] === 'JUNGLE'
+  )
+
+  if (!enemyJungler) {
     return null
   }
 
-  return {
-    selfPosition,
-    opponent: {
-      puuid: opponent.puuid,
-      teamIdentifier: opponent.teamIdentifier,
-      rankedSolo: opponent.rankedSolo,
-      recentGameCount: opponent.analysis?.count ?? null,
-      recentWinRate: opponent.analysis ? opponent.analysis.summary.winRate : null,
-      precautions: computeMatchupPrecautions(opponent.analysis, context.championRoles)
+  const jungle = enemyJungler.analysis?.jungle ?? null
+  const insufficientData = !jungle || jungle.gamesAnalyzed < JUNGLE_THREAT_MIN_GAMES
+  const precautions: MatchupJunglePrecaution[] = []
+
+  if (!insufficientData && jungle) {
+    const earlyGank = getEarlyGankPrecaution(jungle)
+    if (earlyGank) {
+      precautions.push(earlyGank)
+    }
+
+    const preferredLane = getPreferredLanePrecaution(jungle, selfPosition)
+    if (preferredLane) {
+      precautions.push(preferredLane)
     }
   }
+
+  if (opponent && isInSamePremadeGroup(context.premadeGroups, opponent.puuid, enemyJungler.puuid)) {
+    precautions.push({ kind: 'premade-link' })
+  }
+
+  return {
+    puuid: enemyJungler.puuid,
+    teamIdentifier: enemyJungler.teamIdentifier,
+    insufficientData,
+    precautions
+  }
+}
+
+/** 3 / 4 级 gank 率预警：任一档位的 gank 率达到阈值 */
+function getEarlyGankPrecaution(jungle: AggregatedJungleAnalysis): MatchupJunglePrecaution | null {
+  const { level3GankRate, level4GankRate } = jungle.earlyGank
+
+  if (
+    level3GankRate < JUNGLE_THREAT_EARLY_GANK_RATE &&
+    level4GankRate < JUNGLE_THREAT_EARLY_GANK_RATE
+  ) {
+    return null
+  }
+
+  return { kind: 'early-gank', level3GankRate, level4GankRate }
+}
+
+/** 偏好路预警：活动占比最高的路达到阈值；该路即我所在路时预警更明确 */
+function getPreferredLanePrecaution(
+  jungle: AggregatedJungleAnalysis,
+  selfPosition: string
+): MatchupJunglePrecaution | null {
+  let preferredLane: MatchupLane | null = null
+  let preferredRate = -1
+
+  for (const [lane, key] of Object.entries(LANE_ZONE_PERCENTAGE_KEYS) as [
+    MatchupLane,
+    keyof AggregatedJungleAnalysis
+  ][]) {
+    const rate = jungle[key] as number
+    if (rate > preferredRate) {
+      preferredLane = lane
+      preferredRate = rate
+    }
+  }
+
+  if (preferredLane === null || preferredRate < JUNGLE_THREAT_PREFERRED_LANE_RATE) {
+    return null
+  }
+
+  return MATCHUP_POSITION_TO_LANE[selfPosition] === preferredLane
+    ? { kind: 'targets-self', lane: preferredLane }
+    : { kind: 'preferred-lane', lane: preferredLane }
+}
+
+function isInSamePremadeGroup(premadeGroups: string[][], a: string, b: string): boolean {
+  return premadeGroups.some((group) => group.includes(a) && group.includes(b))
 }
 
 /**
