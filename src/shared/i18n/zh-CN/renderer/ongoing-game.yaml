@@ -265,3 +265,6 @@ ongoingGame:
     disabled: 对局页面已禁用，请在设置中重新启用此功能
     avgTeamWinRate: 队伍平均胜率
     avgTeamKda: 队伍平均 KDA
+  situationRead:
+    title: 局势研判
+    insufficientData: 数据不足

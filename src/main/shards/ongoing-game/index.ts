@@ -26,6 +26,7 @@ import { OngoingGameMatchHistoryLoader } from './match-history-loader'
 import { OngoingGamePlayerDataLoader } from './player-data-loader'
 import { ongoingGamePlayerCardTagsSchema } from './setting-schemas'
 import { OngoingGameSideEffectsController } from './side-effects-controller'
+import { OngoingGameSituationReadController } from './situation-read-controller'
 import { OngoingGameSettings, OngoingGameState } from './state'
 
 /**
@@ -51,6 +52,7 @@ export class OngoingGameMain implements IAkariShardInitDispose {
   private readonly _additionalInfo: OngoingGameAdditionalInfoController
   private readonly _sideEffects: OngoingGameSideEffectsController
   private readonly _champSelectHandoff: OngoingGameChampSelectHandoffController
+  private readonly _situationRead: OngoingGameSituationReadController
   private readonly _ipcHandlers: OngoingGameIpcHandlers
 
   constructor(
@@ -168,6 +170,7 @@ export class OngoingGameMain implements IAkariShardInitDispose {
     this._additionalInfo = new OngoingGameAdditionalInfoController(this._context)
     this._sideEffects = new OngoingGameSideEffectsController(this._context)
     this._champSelectHandoff = new OngoingGameChampSelectHandoffController(this._context)
+    this._situationRead = new OngoingGameSituationReadController(this._context)
     this._ipcHandlers = new OngoingGameIpcHandlers(
       this._context,
       this._matchHistory,
@@ -199,6 +202,7 @@ export class OngoingGameMain implements IAkariShardInitDispose {
       'championSelections',
       'positionAssignments',
       'analysis',
+      'situationRead',
       'queryStage',
       'teams',
       'isInEog',
@@ -227,6 +231,7 @@ export class OngoingGameMain implements IAkariShardInitDispose {
     this._ipcHandlers.register()
     this._champSelectHandoff.watch()
     this._analysis.watch()
+    this._situationRead.watch()
     this._sideEffects.watch()
     this._playerData.watch()
     this._matchHistory.watch()

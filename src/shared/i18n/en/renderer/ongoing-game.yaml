@@ -290,3 +290,6 @@ ongoingGame:
     disabled: Game analysis disabled, please re-enable this feature in settings
     avgTeamWinRate: Average Team Win Rate
     avgTeamKda: Average Team KDA
+  situationRead:
+    title: Situation Read
+    insufficientData: Insufficient data
