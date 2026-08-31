@@ -59,7 +59,7 @@
 
 <script lang="ts">
 export const SITUATION_READ_RANKING_ROW_HEIGHT_PX = 52
-export const SITUATION_READ_CARD_HEIGHT_PX = 156
+export const SITUATION_READ_CARD_HEIGHT_PX = 192
 </script>
 
 <script setup lang="ts">

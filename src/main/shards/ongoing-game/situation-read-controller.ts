@@ -23,7 +23,9 @@ export class OngoingGameSituationReadController {
         teamKeys: Object.entries(state.teams)
           .map(([teamIdentifier, puuids]) => `${teamIdentifier}:${puuids.join(',')}`)
           .toSorted(),
-        analysisKeys: Object.keys(state.analysis?.players ?? {}).toSorted(),
+        analysisKeys: Object.entries(state.analysis?.players ?? {})
+          .map(([puuid, analysis]) => `${puuid}:${analysis.count}:${analysis.detailsCount}`)
+          .toSorted(),
         rankedSoloKeys: Object.entries(state.rankedStats)
           .map(
             ([puuid, stats]) =>
@@ -31,6 +33,9 @@ export class OngoingGameSituationReadController {
                 stats.queueMap?.['RANKED_SOLO_5x5']?.division ?? ''
               }`
           )
+          .toSorted(),
+        premadeTeamKeys: Object.entries(state.mergedPremadeTeamMap)
+          .map(([puuid, group]) => `${puuid}:${group}`)
           .toSorted(),
         selfPuuid: leagueClient.data.summoner.me?.puuid ?? null,
         isSuperServerGame: this._isSuperServerGame()
@@ -74,7 +79,8 @@ export class OngoingGameSituationReadController {
     return computeSituationRead({
       players,
       selfTeamIdentifier: this._getSelfTeamIdentifier(),
-      isSuperServerGame: this._isSuperServerGame()
+      isSuperServerGame: this._isSuperServerGame(),
+      premadeTeamMap: this._context.state.mergedPremadeTeamMap
     })
   }
 

@@ -302,3 +302,17 @@ ongoingGame:
     basisRecentOnly_one: '{winRate}% WR in {count} recent game'
     basisRecentOnly_other: '{winRate}% WR in {count} recent games'
     openDetailHint: Click to open full analysis
+    featureTags:
+      losingStreak_one: '{{count}} loss streak'
+      losingStreak_other: '{{count}} loss streak'
+      winningStreak_one: '{{count}} win streak'
+      winningStreak_other: '{{count}} win streak'
+      highWinRate: Very high win rate
+      favoriteChampion: 'Plays {{champion}}'
+      kdaStable: Consistent
+      kdaVolatile: Volatile
+      gankSensitiveEasy: Gankable
+      gankSensitiveVeryEasy: Very gankable
+      suspiciousFlash: Inconsistent flash
+      premade_one: 'Premade of {{count}}'
+      premade_other: 'Premade of {{count}}'

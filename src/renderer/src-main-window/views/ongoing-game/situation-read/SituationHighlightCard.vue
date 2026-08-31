@@ -24,6 +24,16 @@
 
     <div class="truncate text-xs text-black/50 dark:text-white/50">{{ basisText }}</div>
 
+    <div v-if="featureTagViews.length" class="flex flex-wrap gap-1">
+      <span
+        v-for="tag of featureTagViews"
+        :key="tag.key"
+        :class="['rounded-xs px-1 py-0.5 text-[11px] leading-[11px]', tag.class]"
+      >
+        {{ tag.text }}
+      </span>
+    </div>
+
     <div v-if="secondaryText" class="truncate text-xs text-black/45 dark:text-white/45">
       {{ secondaryText }}
     </div>
@@ -31,7 +41,8 @@
 </template>
 
 <script setup lang="ts">
-import type { SituationReadHighlight } from '@shared/shards/ongoing-game'
+import type { SituationFeatureTag, SituationReadHighlight } from '@shared/shards/ongoing-game'
+import { useAkariResourceProvider } from '@renderer-shared/providers/akari-resource'
 import { useOngoingGameStore } from '@renderer-shared/shards/ongoing-game/store'
 import { useTranslation } from 'i18next-vue'
 import { computed } from 'vue'
@@ -52,6 +63,8 @@ const emit = defineEmits<{
 const { t } = useTranslation()
 
 const ongoingGameStore = useOngoingGameStore()
+
+const resources = useAkariResourceProvider()
 
 const name = computed(() => {
   const summoner = ongoingGameStore.summoner[highlight.puuid]
@@ -108,4 +121,85 @@ const secondaryText = computed(() => {
 
   return t(secondaryLabelKey, { name, score: secondary.score.toFixed(1) })
 })
+
+/** 标签底色沿用玩家卡标签家族的配色约定 */
+const FEATURE_TAG_CLASSES = {
+  'losing-streak': 'bg-[#893b3b] text-white',
+  'winning-streak': 'bg-[#18571c] text-white',
+  'high-win-rate': 'bg-[#7e2c85] text-white',
+  'favorite-champion': 'bg-[#2451a6] text-white',
+  'kda-stability-stable': 'bg-[#1a7a2a] text-white',
+  'kda-stability-volatile': 'bg-[#8a4400] text-white',
+  'gank-sensitive-easy': 'bg-[#8f541e] text-white',
+  'gank-sensitive-very-easy': 'bg-[#a81919] text-white',
+  'suspicious-flash': 'bg-[#3a1bb8] text-white',
+  premade: 'bg-[#0f6f68] text-white'
+} as const
+
+function getFeatureTagView(tag: SituationFeatureTag) {
+  const keyPrefix = 'ongoingGame.situationRead.featureTags'
+
+  switch (tag.type) {
+    case 'losing-streak':
+      return {
+        key: `${tag.type}:${tag.count}`,
+        class: FEATURE_TAG_CLASSES[tag.type],
+        text: t(`${keyPrefix}.losingStreak`, { count: tag.count })
+      }
+    case 'winning-streak':
+      return {
+        key: `${tag.type}:${tag.count}`,
+        class: FEATURE_TAG_CLASSES[tag.type],
+        text: t(`${keyPrefix}.winningStreak`, { count: tag.count })
+      }
+    case 'high-win-rate':
+      return {
+        key: tag.type,
+        class: FEATURE_TAG_CLASSES[tag.type],
+        text: t(`${keyPrefix}.highWinRate`)
+      }
+    case 'favorite-champion':
+      return {
+        key: `${tag.type}:${tag.championId}`,
+        class: FEATURE_TAG_CLASSES[tag.type],
+        text: t(`${keyPrefix}.favoriteChampion`, {
+          champion: resources.champions.name(tag.championId)
+        })
+      }
+    case 'kda-stability':
+      return {
+        key: `${tag.type}:${tag.stable}`,
+        class: tag.stable
+          ? FEATURE_TAG_CLASSES['kda-stability-stable']
+          : FEATURE_TAG_CLASSES['kda-stability-volatile'],
+        text: tag.stable ? t(`${keyPrefix}.kdaStable`) : t(`${keyPrefix}.kdaVolatile`)
+      }
+    case 'gank-sensitive':
+      return {
+        key: `${tag.type}:${tag.level}`,
+        class:
+          tag.level === 'easy'
+            ? FEATURE_TAG_CLASSES['gank-sensitive-easy']
+            : FEATURE_TAG_CLASSES['gank-sensitive-very-easy'],
+        text:
+          tag.level === 'easy'
+            ? t(`${keyPrefix}.gankSensitiveEasy`)
+            : t(`${keyPrefix}.gankSensitiveVeryEasy`)
+      }
+    case 'suspicious-flash':
+      return {
+        key: tag.type,
+        class: FEATURE_TAG_CLASSES[tag.type],
+        text: t(`${keyPrefix}.suspiciousFlash`)
+      }
+    case 'premade':
+      return {
+        key: `${tag.type}:${tag.size}`,
+        class: FEATURE_TAG_CLASSES[tag.type],
+        text: t(`${keyPrefix}.premade`, { count: tag.size })
+      }
+  }
+}
+
+const featureTagViews = computed(() => highlight.featureTags.map(getFeatureTagView))
 </script>
