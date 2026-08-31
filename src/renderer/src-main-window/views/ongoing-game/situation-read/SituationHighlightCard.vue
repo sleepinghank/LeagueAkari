@@ -13,9 +13,17 @@
       <span v-if="positionLabel" class="shrink-0 text-black/50 dark:text-white/50">
         {{ positionLabel }}
       </span>
+      <span
+        v-if="championName"
+        class="ml-auto min-w-0 truncate text-black/50 dark:text-white/50"
+        :title="championName"
+      >
+        {{ championName }}
+      </span>
     </div>
 
     <div class="flex items-center gap-2">
+      <ChampionIcon v-if="hasChampion" class="size-5 shrink-0" round :champion-id="championId" />
       <span class="min-w-0 flex-1 truncate text-sm font-bold">{{ name }}</span>
       <span class="shrink-0 text-xl font-bold text-(--la-color-text-themed) tabular-nums">
         {{ highlight.score.toFixed(1) }}
@@ -34,8 +42,17 @@
       </span>
     </div>
 
-    <div v-if="secondaryText" class="truncate text-xs text-black/45 dark:text-white/45">
-      {{ secondaryText }}
+    <div
+      v-if="secondaryText"
+      class="flex items-center gap-1 text-xs text-black/45 dark:text-white/45"
+    >
+      <ChampionIcon
+        v-if="secondaryChampionId > 0"
+        class="size-4 shrink-0"
+        round
+        :champion-id="secondaryChampionId"
+      />
+      <span class="truncate">{{ secondaryText }}</span>
     </div>
   </div>
 </template>
@@ -46,6 +63,8 @@ import { useAkariResourceProvider } from '@renderer-shared/providers/akari-resou
 import { useOngoingGameStore } from '@renderer-shared/shards/ongoing-game/store'
 import { useTranslation } from 'i18next-vue'
 import { computed } from 'vue'
+
+import ChampionIcon from '@renderer-shared/components/widgets/ChampionIcon.vue'
 
 const { highlight, label, secondaryLabelKey, teamColorClass } = defineProps<{
   highlight: SituationReadHighlight
@@ -79,6 +98,14 @@ const positionLabel = computed(() => {
 
   return t(`positions.${position}`, { ns: 'common' })
 })
+
+const championId = computed(() => ongoingGameStore.championSelections?.[highlight.puuid] ?? 0)
+
+const hasChampion = computed(() => championId.value > 0)
+
+const championName = computed(() =>
+  hasChampion.value ? resources.champions.name(championId.value) : null
+)
 
 const rankText = computed(() => {
   const solo = ongoingGameStore.rankedStats[highlight.puuid]?.queueMap?.['RANKED_SOLO_5x5']
@@ -120,6 +147,15 @@ const secondaryText = computed(() => {
   const name = summoner?.gameName || summoner?.displayName || secondary.puuid
 
   return t(secondaryLabelKey, { name, score: secondary.score.toFixed(1) })
+})
+
+const secondaryChampionId = computed(() => {
+  const secondary = highlight.secondary
+  if (!secondary) {
+    return 0
+  }
+
+  return ongoingGameStore.championSelections?.[secondary.puuid] ?? 0
 })
 
 /** 标签底色沿用玩家卡标签家族的配色约定 */
