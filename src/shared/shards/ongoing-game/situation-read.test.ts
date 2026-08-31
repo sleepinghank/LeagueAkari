@@ -1496,13 +1496,17 @@ describe('getSituationReadModeTier', () => {
     ['CLASSIC', 440, 'full'],
     ['CLASSIC', 490, 'full'],
     // 召唤师峡谷：自定义与人机 → 整卡隐藏
-    ['CLASSIC', 76, 'hidden'],
+    ['CLASSIC', 0, 'hidden'],
     ['CLASSIC', 830, 'hidden'],
     ['CLASSIC', 840, 'hidden'],
     ['CLASSIC', 850, 'hidden'],
+    // 76 是已停用的 6v6 Hexakill 限时模式而非自定义，不隐藏
+    ['CLASSIC', 76, 'full'],
     // 大乱斗 → 仅威胁分排行与头号卡
     ['ARAM', 450, 'basic'],
     ['ARAM', null, 'basic'],
+    // 自定义大乱斗 → 整卡隐藏
+    ['ARAM', 0, 'hidden'],
     // 斗魂竞技场与其它模式 → 整卡隐藏
     ['CHERRY', 1700, 'hidden'],
     ['CHERRY', null, 'hidden'],

@@ -2,6 +2,7 @@ import type {
   AggregatedAnalysis,
   AggregatedJungleAnalysis
 } from '@shared/data-adapter/analysis/player'
+import { QueueEnum } from '@shared/types/league-client/game-data'
 import type { RankedStats } from '@shared/types/league-client/ranked'
 
 /**
@@ -99,18 +100,26 @@ export const SUPER_SERVER_RSO_PLATFORM_ID = 'BGP2'
  */
 export type SituationReadModeTier = 'full' | 'basic' | 'hidden'
 
-/** 召唤师峡谷内不展示研判的队列：自定义与人机 */
+/** 召唤师峡谷内不展示研判的队列：自定义（queueId 0）与人机 */
 export const SITUATION_READ_HIDDEN_CLASSIC_QUEUE_IDS: ReadonlySet<number> = new Set([
-  76, 830, 840, 850
+  QueueEnum.CUSTOM,
+  QueueEnum.BOT_INTRO,
+  QueueEnum.BOT_INTERMEDIATE,
+  QueueEnum.BOT_BEGINNER
 ])
 
 /**
  * 对局模式 → 研判展示档位。模式未知（null / undefined，如草稿模式未携带 gameMode）时不降级。
+ * 自定义对局（queueId 0，含自定义召唤师峡谷与自定义大乱斗）一律整卡隐藏。
  */
 export function getSituationReadModeTier(
   gameMode: string | null | undefined,
   queueId: number | null | undefined
 ): SituationReadModeTier {
+  if (queueId === QueueEnum.CUSTOM) {
+    return 'hidden'
+  }
+
   switch (gameMode) {
     case 'CLASSIC':
       return queueId != null && SITUATION_READ_HIDDEN_CLASSIC_QUEUE_IDS.has(queueId)
