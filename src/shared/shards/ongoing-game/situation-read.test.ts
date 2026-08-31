@@ -13,6 +13,7 @@ import {
   type SituationReadPlayerInput,
   computeSituationRead,
   extractSoloRankedEntry,
+  getSituationReadModeTier,
   selectFeatureTags
 } from './situation-read'
 
@@ -1484,5 +1485,86 @@ describe('computeSituationRead matchup report', () => {
         'enemy-sup'
       ])
     })
+  })
+})
+
+describe('getSituationReadModeTier', () => {
+  it.each([
+    // 召唤师峡谷：排位 / 匹配 → 完整研判
+    ['CLASSIC', 420, 'full'],
+    ['CLASSIC', 430, 'full'],
+    ['CLASSIC', 440, 'full'],
+    ['CLASSIC', 490, 'full'],
+    // 召唤师峡谷：自定义与人机 → 整卡隐藏
+    ['CLASSIC', 76, 'hidden'],
+    ['CLASSIC', 830, 'hidden'],
+    ['CLASSIC', 840, 'hidden'],
+    ['CLASSIC', 850, 'hidden'],
+    // 大乱斗 → 仅威胁分排行与头号卡
+    ['ARAM', 450, 'basic'],
+    ['ARAM', null, 'basic'],
+    // 斗魂竞技场与其它模式 → 整卡隐藏
+    ['CHERRY', 1700, 'hidden'],
+    ['CHERRY', null, 'hidden'],
+    ['URF', 900, 'hidden'],
+    ['NEXUSBLITZ', null, 'hidden'],
+    ['PRACTICETOOL', null, 'hidden'],
+    ['BRAWL', null, 'hidden'],
+    ['STRAWBERRY', null, 'hidden'],
+    // 模式未知（如草稿模式未携带 gameMode）→ 不降级
+    [null, null, 'full'],
+    [undefined, undefined, 'full']
+  ])('maps game mode %s (queue %j) to tier %s', (gameMode, queueId, tier) => {
+    expect(getSituationReadModeTier(gameMode, queueId)).toBe(tier)
+  })
+})
+
+describe('computeSituationRead mode degradation', () => {
+  const players: SituationReadPlayerInput[] = [
+    createPlayer('me', { tier: 'GOLD', division: 'IV' }, null, 'TEAM-100'),
+    createPlayer('ally', { tier: 'GOLD', division: 'IV' }, null, 'TEAM-100'),
+    createPlayer(
+      'enemy-mid',
+      { tier: 'DIAMOND', division: 'II' },
+      createAnalysis({ count: 10, winRate: 0.5 }),
+      'TEAM-200'
+    ),
+    createPlayer('enemy-top', { tier: 'GOLD', division: 'IV' }, null, 'TEAM-200'),
+    createPlayer('enemy-jungle', { tier: 'GOLD', division: 'IV' }, null, 'TEAM-200')
+  ]
+
+  const matchup = {
+    selfPuuid: 'me',
+    positionAssignments: {
+      me: 'MIDDLE',
+      'enemy-mid': 'MIDDLE',
+      'enemy-top': 'TOP',
+      'enemy-jungle': 'JUNGLE'
+    },
+    championRoles: {},
+    premadeGroups: [],
+    selfChampionId: null
+  }
+
+  it('keeps the matchup report in the full tier', () => {
+    const read = computeSituationRead({ players, matchup, selfTeamIdentifier: 'TEAM-100' })
+
+    expect(read.matchupReport).not.toBeNull()
+    expect(read.topThreat).not.toBeNull()
+    expect(read.keyCarry).not.toBeNull()
+  })
+
+  it('drops the matchup report in the basic tier while keeping rankings and highlights', () => {
+    const read = computeSituationRead({
+      players,
+      matchup,
+      selfTeamIdentifier: 'TEAM-100',
+      modeTier: 'basic'
+    })
+
+    expect(read.matchupReport).toBeNull()
+    expect(read.threatRankings).toHaveLength(5)
+    expect(read.topThreat).not.toBeNull()
+    expect(read.keyCarry).not.toBeNull()
   })
 })

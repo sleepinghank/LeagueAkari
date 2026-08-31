@@ -10,7 +10,8 @@ import {
   type SituationRead,
   type SituationReadPlayerInput,
   computeSituationRead,
-  extractSoloRankedEntry
+  extractSoloRankedEntry,
+  getSituationReadModeTier
 } from '@shared/shards/ongoing-game'
 import { formatError } from '@shared/utils/errors'
 import { compareStructural } from 'mobx'
@@ -28,6 +29,8 @@ const SELF_POSITION_TO_CHAMPION_DATA_POSITION: Record<string, ChampionDataPositi
 
 /**
  * 局势研判：在既有玩家聚合分析与段位数据的基础上，计算威胁分排行与对位专报并同步到状态。
+ * 按对局模式降级（大乱斗仅排行与头号卡；斗魂竞技场、人机、自定义整卡隐藏），
+ * 对局结束（EOG）后随对局阶段清空，不残留到下一局。
  * 英雄克制数据经既有英雄数据适配器按我的英雄加载，以查询函数注入纯计算层。
  */
 export class OngoingGameSituationReadController {
@@ -78,7 +81,10 @@ export class OngoingGameSituationReadController {
         championRoleCount: Object.keys(this._context.leagueClient.data.gameData.champions).length,
         isSuperServerGame: this._isSuperServerGame(),
         selfChampionId: this._getSelfChampionId() ?? 0,
-        championDataQuery: this._getChampionDataQueryKey()
+        championDataQuery: this._getChampionDataQueryKey(),
+        isInEog: state.isInEog,
+        gameMode: this._getGameMode() ?? '',
+        queueId: this._getQueueId() ?? 0
       }),
       () => {
         this._syncCounterData()
@@ -90,6 +96,27 @@ export class OngoingGameSituationReadController {
 
   private _isSuperServerGame() {
     return this._context.leagueClient.state.auth?.rsoPlatformId === SUPER_SERVER_RSO_PLATFORM_ID
+  }
+
+  /**
+   * 当前对局模式：优先取对局阶段携带的 gameMode；
+   * 草稿 / 大厅阶段未携带时退回 queueType（其值同样为 gameMode 字符串，如 CLASSIC / CHERRY / ARAM）。
+   */
+  private _getGameMode(): string | null {
+    const gameInfo = this._context.state.queryStage.gameInfo
+    if (!gameInfo) {
+      return null
+    }
+
+    if ('gameMode' in gameInfo && gameInfo.gameMode) {
+      return gameInfo.gameMode
+    }
+
+    return gameInfo.queueType || null
+  }
+
+  private _getQueueId(): number | null {
+    return this._context.state.queryStage.gameInfo?.queueId ?? null
   }
 
   private _getSelfPuuid() {
@@ -206,6 +233,18 @@ export class OngoingGameSituationReadController {
   private _computeSituationRead(): SituationRead | null {
     const { state } = this._context
 
+    // 对局结束（EOG）后研判卡随对局阶段清空，下一局不残留旧数据
+    if (state.isInEog) {
+      return null
+    }
+
+    const modeTier = getSituationReadModeTier(this._getGameMode(), this._getQueueId())
+
+    // 斗魂竞技场、人机、自定义等模式整卡隐藏
+    if (modeTier === 'hidden') {
+      return null
+    }
+
     const teamEntries = Object.entries(state.teams)
     if (!teamEntries.length) {
       return null
@@ -233,6 +272,7 @@ export class OngoingGameSituationReadController {
       selfTeamIdentifier: this._getSelfTeamIdentifier(),
       isSuperServerGame: this._isSuperServerGame(),
       premadeTeamMap: this._context.state.mergedPremadeTeamMap,
+      modeTier,
       matchup: {
         selfPuuid: this._getSelfPuuid(),
         positionAssignments: Object.fromEntries(

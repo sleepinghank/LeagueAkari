@@ -91,6 +91,42 @@ export const SITUATION_MIN_ELIGIBLE_SAMPLE_COUNT = 3
  */
 export const SUPER_SERVER_RSO_PLATFORM_ID = 'BGP2'
 
+/**
+ * 研判展示档位（按对局模式降级）：
+ * - full：召唤师峡谷（排位 / 匹配）——排行 + 头号卡 + 对位专报；
+ * - basic：大乱斗——仅威胁分排行与头号卡（无位置概念，对位专报与打野小节隐藏）；
+ * - hidden：斗魂竞技场、人机、自定义及其它模式——研判卡整卡隐藏。
+ */
+export type SituationReadModeTier = 'full' | 'basic' | 'hidden'
+
+/** 召唤师峡谷内不展示研判的队列：自定义与人机 */
+export const SITUATION_READ_HIDDEN_CLASSIC_QUEUE_IDS: ReadonlySet<number> = new Set([
+  76, 830, 840, 850
+])
+
+/**
+ * 对局模式 → 研判展示档位。模式未知（null / undefined，如草稿模式未携带 gameMode）时不降级。
+ */
+export function getSituationReadModeTier(
+  gameMode: string | null | undefined,
+  queueId: number | null | undefined
+): SituationReadModeTier {
+  switch (gameMode) {
+    case 'CLASSIC':
+      return queueId != null && SITUATION_READ_HIDDEN_CLASSIC_QUEUE_IDS.has(queueId)
+        ? 'hidden'
+        : 'full'
+    case 'ARAM':
+      return 'basic'
+    case null:
+    case undefined:
+    case '':
+      return 'full'
+    default:
+      return 'hidden'
+  }
+}
+
 /** 头号卡展示的特征标签数量上限 */
 export const SITUATION_FEATURE_TAGS_MAX_COUNT = 3
 
@@ -363,7 +399,7 @@ export function extractSoloRankedEntry(
 
 /**
  * 计算局势研判结果：敌我十人威胁分排行、敌方头号威胁与我方核心大腿（含次级与特征标签）+ 对位专报。
- * 纯函数，不依赖 IPC / 网络。
+ * 纯函数，不依赖 IPC / 网络。basic 档位（大乱斗）下对位专报整体不产出。
  */
 export function computeSituationRead(options: {
   players: SituationReadPlayerInput[]
@@ -375,6 +411,8 @@ export function computeSituationRead(options: {
   premadeTeamMap?: Record<string, number> | null
   /** 对位专报上下文；缺省时不产出专报 */
   matchup?: MatchupReadContext
+  /** 展示档位；basic（大乱斗）时对位专报与打野小节隐藏。缺省 full */
+  modeTier?: SituationReadModeTier
 }): SituationRead {
   const threatRankings = options.players.map((player) => ({
     puuid: player.puuid,
@@ -413,7 +451,12 @@ export function computeSituationRead(options: {
           premadeGroupSizes
         )
       : null,
-    matchupReport: options.matchup ? computeMatchupReport(options.players, options.matchup) : null
+    matchupReport:
+      options.modeTier === 'basic'
+        ? null
+        : options.matchup
+          ? computeMatchupReport(options.players, options.matchup)
+          : null
   }
 }
 
