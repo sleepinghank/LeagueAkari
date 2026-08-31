@@ -14,9 +14,11 @@ import type { RankedStats } from '@shared/types/league-client/ranked'
  * - 无段位且无近期战绩时输出"数据不足"哨兵（score 为 null）。
  *
  * 对位专报（Matchup Report）：自动识别"我"的位置并按视角产出定向分析——
- * - 分路玩家：同位置对手的最近表现与模板化注意事项（近期状态 + 英雄粗分类），
+ * - 分路玩家：同位置对手的最近表现与模板化注意事项（英雄克制 + 近期状态 + 英雄粗分类），
  *   外加敌方打野威胁小节（3 / 4 级 gank 率、偏好路、预组队联动）；
  * - 打野玩家：对位部分替换为敌方各路易被抓排名（被 gank 敏感度特征）。
+ * 英雄克制动用注入的克制查询（既有英雄数据适配器的 favorable/unfavorable 关系），
+ * 我未选定英雄时克制提示整条跳过。
  */
 
 /** 未定级（无单双排段位）玩家的基线 */
@@ -145,6 +147,22 @@ export interface SituationReadRankedSolo {
   division: string
 }
 
+/** 注入的英雄克制查询返回的克制关系：查询英雄对目标英雄 favorable / unfavorable，附对抗表现 */
+export interface ChampionCounterRelation {
+  relationship: 'favorable' | 'unfavorable'
+  /** 查询英雄在该对位中的胜率；数据缺失为 null */
+  winRate: number | null
+}
+
+/**
+ * 注入的英雄克制查询：返回 myChampionId 对 otherChampionId 的克制关系与对抗表现。
+ * 无克制数据（含关系 unknown）返回 null，不猜。数据来自既有英雄数据适配器。
+ */
+export type ChampionCounterQuery = (
+  myChampionId: number,
+  otherChampionId: number
+) => ChampionCounterRelation | null
+
 export interface SituationReadPlayerInput {
   puuid: string
   teamIdentifier: string
@@ -163,10 +181,12 @@ export interface SituationPlayerThreat {
 
 /**
  * 对位专报的注意事项（特征标签 → 固定模板文案）。
+ * - 英雄克制：对手常用英雄中克制我当前英雄的（我未选定英雄时整条跳过）
  * - 近期状态类：连败 / 连胜 / 高胜率高 KDA（状态平庸时不产生）
  * - 英雄粗分类：对手常用英雄携带的 LCU roles 粗分类
  */
 export type MatchupPrecaution =
+  | { kind: 'champion-counter'; championId: number; winRate: number | null }
   | { kind: 'losing-streak'; count: number }
   | { kind: 'winning-streak'; count: number }
   | { kind: 'hot-streak'; winRate: number; kda: number }
@@ -244,6 +264,10 @@ export interface MatchupReadContext {
   championRoles: Record<number, readonly string[]>
   /** 既有预组队推断结果：每组为一路预组队的 puuid 集合 */
   premadeGroups: string[][]
+  /** 我已选定的英雄；未选定为 null（克制提示整条跳过） */
+  selfChampionId: number | null
+  /** 注入的英雄克制查询；缺省时不产出克制提示 */
+  counterQuery?: ChampionCounterQuery
 }
 
 export interface SituationRead {
@@ -344,7 +368,7 @@ function computeMatchupReport(
           rankedSolo: opponent.rankedSolo,
           recentGameCount: opponent.analysis?.count ?? null,
           recentWinRate: opponent.analysis ? opponent.analysis.summary.winRate : null,
-          precautions: computeMatchupPrecautions(opponent.analysis, context.championRoles)
+          precautions: computeMatchupPrecautions(opponent.analysis, context)
         }
       : null,
     jungleThreat: computeJungleThreat(enemies, context, selfPosition, opponent ?? null)
@@ -477,27 +501,54 @@ function isInSamePremadeGroup(premadeGroups: string[][], a: string, b: string): 
 }
 
 /**
- * 注意事项规则：近期状态（连败 / 连胜 / 高胜率高 KDA，互斥取最强信号）+ 常用英雄粗分类。
- * 状态平庸时不产出状态类提示。
+ * 注意事项规则：英雄克制（我已选定英雄时）+ 近期状态（连败 / 连胜 / 高胜率高 KDA，
+ * 互斥取最强信号）+ 常用英雄粗分类。状态平庸时不产出状态类提示。
  */
 function computeMatchupPrecautions(
   analysis: AggregatedAnalysis | null,
-  championRoles: Record<number, readonly string[]>
+  context: MatchupReadContext
 ): MatchupPrecaution[] {
   if (!analysis) {
     return []
   }
 
-  const precautions: MatchupPrecaution[] = []
+  const precautions: MatchupPrecaution[] = [...getChampionCounterPrecautions(analysis, context)]
   const recentForm = getRecentFormPrecaution(analysis)
 
   if (recentForm) {
     precautions.push(recentForm)
   }
 
-  precautions.push(...getChampionArchetypePrecautions(analysis, championRoles))
+  precautions.push(...getChampionArchetypePrecautions(analysis, context.championRoles))
 
   return precautions
+}
+
+/**
+ * 英雄克制规则：对手常用英雄中克制我当前英雄的，经注入的克制查询判定。
+ * 我未选定英雄、未注入查询或无克制数据时不产出（不猜）。
+ */
+function getChampionCounterPrecautions(
+  analysis: AggregatedAnalysis,
+  context: MatchupReadContext
+): MatchupPrecaution[] {
+  const { selfChampionId, counterQuery } = context
+
+  if (selfChampionId === null || !counterQuery) {
+    return []
+  }
+
+  return getFrequentChampionIds(analysis)
+    .map((championId) => ({ championId, relation: counterQuery(selfChampionId, championId) }))
+    .filter(
+      (item): item is { championId: number; relation: ChampionCounterRelation } =>
+        item.relation !== null && item.relation.relationship === 'unfavorable'
+    )
+    .map(({ championId, relation }) => ({
+      kind: 'champion-counter' as const,
+      championId,
+      winRate: relation.winRate
+    }))
 }
 
 /** 近期状态规则；连败 > 连胜 > 状态火热，三者互斥 */
@@ -523,19 +574,22 @@ function getRecentFormPrecaution(analysis: AggregatedAnalysis): MatchupPrecautio
   return null
 }
 
+/** 常用英雄：近期使用集中的前几个（按场次降序，至少 MATCHUP_FREQUENT_CHAMPION_MIN_GAMES 场） */
+function getFrequentChampionIds(analysis: AggregatedAnalysis): number[] {
+  return Object.values(analysis.champions)
+    .filter((champion) => champion.winLoss.all.count >= MATCHUP_FREQUENT_CHAMPION_MIN_GAMES)
+    .toSorted((a, b) => b.winLoss.all.count - a.winLoss.all.count)
+    .slice(0, MATCHUP_FREQUENT_CHAMPION_COUNT)
+    .map((champion) => champion.championId)
+}
+
 /** 英雄粗分类规则：对手常用英雄携带的 LCU roles 粗分类 → 类型提示（固定顺序去重） */
 function getChampionArchetypePrecautions(
   analysis: AggregatedAnalysis,
   championRoles: Record<number, readonly string[]>
 ): MatchupPrecaution[] {
-  const frequentChampionIds = Object.values(analysis.champions)
-    .filter((champion) => champion.winLoss.all.count >= MATCHUP_FREQUENT_CHAMPION_MIN_GAMES)
-    .toSorted((a, b) => b.winLoss.all.count - a.winLoss.all.count)
-    .slice(0, MATCHUP_FREQUENT_CHAMPION_COUNT)
-    .map((champion) => champion.championId)
-
   const archetypes = new Set<string>()
-  for (const championId of frequentChampionIds) {
+  for (const championId of getFrequentChampionIds(analysis)) {
     for (const role of championRoles[championId] ?? []) {
       if ((MATCHUP_ARCHETYPE_ORDER as readonly string[]).includes(role)) {
         archetypes.add(role)

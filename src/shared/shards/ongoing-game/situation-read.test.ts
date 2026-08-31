@@ -7,6 +7,7 @@ import type { RankedStats } from '@shared/types/league-client/ranked'
 import { describe, expect, it } from 'vitest'
 
 import {
+  type ChampionCounterQuery,
   type JunglerMatchupReport,
   type LanerMatchupReport,
   type SituationReadPlayerInput,
@@ -484,6 +485,8 @@ describe('computeSituationRead matchup report', () => {
     championRoles?: Record<number, string[]>
     premadeGroups?: string[][]
     players?: SituationReadPlayerInput[]
+    selfChampionId?: number | null
+    counterQuery?: ChampionCounterQuery
   }) {
     return {
       players: options.players ?? [
@@ -516,7 +519,9 @@ describe('computeSituationRead matchup report', () => {
               }
             : options.positionAssignments,
         championRoles: options.championRoles ?? {},
-        premadeGroups: options.premadeGroups ?? []
+        premadeGroups: options.premadeGroups ?? [],
+        selfChampionId: options.selfChampionId === undefined ? null : options.selfChampionId,
+        counterQuery: options.counterQuery
       }
     }
   }
@@ -698,6 +703,106 @@ describe('computeSituationRead matchup report', () => {
           championRoles: { 238: ['Assassin', 'Mage'], 55: ['Mage'] }
         })
       ).toEqual(['Assassin', 'Mage'])
+    })
+  })
+
+  describe('champion counter precaution rule', () => {
+    function getCounterPrecautions(options: {
+      champions?: Record<number, number>
+      selfChampionId?: number | null
+      counterQuery?: ChampionCounterQuery
+    }) {
+      const result = computeSituationRead(
+        createMatchupOptions({
+          enemyAnalysis: createAnalysis({
+            count: 20,
+            winRate: 0.5,
+            champions: options.champions ?? { 238: 3 }
+          }),
+          selfChampionId: options.selfChampionId === undefined ? 103 : options.selfChampionId,
+          counterQuery: options.counterQuery
+        })
+      )
+
+      return asLanerReport(result).opponent!.precautions.filter(
+        (p) => p.kind === 'champion-counter'
+      )
+    }
+
+    it.each([
+      // 描述, 对手常用英雄（championId → 场次）, 克制查询, 期望克制提示
+      [
+        'flags a frequently played champion that counters mine',
+        { 238: 3 },
+        (_myChampionId: number, otherChampionId: number) =>
+          otherChampionId === 238 ? { relationship: 'unfavorable' as const, winRate: 0.43 } : null,
+        [{ kind: 'champion-counter', championId: 238, winRate: 0.43 }]
+      ],
+      [
+        'ignores a matchup that favors my champion',
+        { 238: 3 },
+        () => ({ relationship: 'favorable' as const, winRate: 0.57 }),
+        []
+      ],
+      ['ignores matchups without counter data', { 238: 3 }, () => null, []],
+      [
+        'keeps the hint while the matchup win rate is missing',
+        { 238: 3 },
+        () => ({ relationship: 'unfavorable' as const, winRate: null }),
+        [{ kind: 'champion-counter', championId: 238, winRate: null }]
+      ],
+      [
+        'lists every countering frequent champion in frequent order',
+        { 238: 3, 55: 2 },
+        (_myChampionId: number, otherChampionId: number) =>
+          otherChampionId === 55 || otherChampionId === 238
+            ? { relationship: 'unfavorable' as const, winRate: 0.4 }
+            : null,
+        [
+          { kind: 'champion-counter', championId: 238, winRate: 0.4 },
+          { kind: 'champion-counter', championId: 55, winRate: 0.4 }
+        ]
+      ],
+      [
+        'ignores champions played only once',
+        { 238: 1 },
+        () => ({ relationship: 'unfavorable' as const, winRate: 0.4 }),
+        []
+      ]
+    ])('%s', (_, champions, counterQuery, expected) => {
+      expect(getCounterPrecautions({ champions, counterQuery })).toEqual(expected)
+    })
+
+    it('skips the rule while no champion is selected and never queries', () => {
+      const calls: Array<[number, number]> = []
+      const counterQuery: ChampionCounterQuery = (myChampionId, otherChampionId) => {
+        calls.push([myChampionId, otherChampionId])
+        return null
+      }
+
+      expect(getCounterPrecautions({ selfChampionId: null, counterQuery })).toEqual([])
+      expect(calls).toEqual([])
+    })
+
+    it('skips the rule without an injected counter query', () => {
+      expect(getCounterPrecautions({})).toEqual([])
+    })
+
+    it('ignores champions outside the frequent top set', () => {
+      const calls: number[] = []
+      const counterQuery: ChampionCounterQuery = (_myChampionId, otherChampionId) => {
+        calls.push(otherChampionId)
+        return { relationship: 'unfavorable', winRate: 0.4 }
+      }
+
+      expect(
+        getCounterPrecautions({ champions: { 1: 5, 2: 4, 3: 3, 238: 2 }, counterQuery })
+      ).toEqual([
+        { kind: 'champion-counter', championId: 1, winRate: 0.4 },
+        { kind: 'champion-counter', championId: 2, winRate: 0.4 },
+        { kind: 'champion-counter', championId: 3, winRate: 0.4 }
+      ])
+      expect(calls).toEqual([1, 2, 3])
     })
   })
 
@@ -898,7 +1003,8 @@ describe('computeSituationRead matchup report', () => {
               'enemy-jungle': 'JUNGLE'
             },
             championRoles: {},
-            premadeGroups: []
+            premadeGroups: [],
+            selfChampionId: null
           }
         })
       )
