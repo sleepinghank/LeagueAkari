@@ -316,3 +316,35 @@ ongoingGame:
       suspiciousFlash: Inconsistent flash
       premade_one: 'Premade of {{count}}'
       premade_other: 'Premade of {{count}}'
+    matchup:
+      title: Matchup Report
+      summary_one: '{{count}} game, {{rate}} win rate'
+      summary_other: '{{count}} games, {{rate}} win rate'
+      precautions:
+        championCounter: Frequently plays {{champion}}, which counters your champion
+        championCounterWithWinRate: Frequently plays {{champion}}, which counters your champion
+          ({{winRate}} win rate for your champion)
+        losingStreak_one: On a {{count}}-game losing streak — may be tilted, consider applying pressure
+        losingStreak_other: On a {{count}}-game losing streak — may be tilted, consider applying pressure
+        winningStreak_one: On a {{count}}-game winning streak — in good form, play carefully
+        winningStreak_other: On a {{count}}-game winning streak — in good form, play carefully
+        hotStreak: 'In hot form ({{winRate}} win rate, {{kda}} KDA)'
+        archetype:
+          Assassin: Frequently plays assassins — beware burst damage
+          Mage: Frequently plays mages — beware long-range poke
+          Marksman: Frequently plays marksmen — beware sustained damage and scaling
+          Fighter: Frequently plays fighters — beware extended trades and sustain
+          Tank: Frequently plays tanks — beware frontline engage
+          Support: Frequently plays supports — beware peel and crowd control
+      jungleThreat:
+        insufficientData: Insufficient data on the enemy jungler
+        precautions:
+          earlyGank: High early gank rate (level 3 {{level3Rate}}, level 4 {{level4Rate}}) — ward
+            before pushing early
+          preferredLane: Prefers to gank {{lane}}
+          targetsSelf: Prefers to gank your lane ({{lane}}) — ward before pushing early
+          premadeLink: The opponent and the enemy jungler appear to be premade — beware coordinated
+            ganks
+      gankTargets:
+        title: Easiest enemy lanes to gank
+        stat: '{{value}} early deaths to jungle ganks per game'

@@ -4,6 +4,7 @@ import { compareShallow } from 'mobx'
 import { z } from 'zod'
 
 import { AppCommonMain } from '../app-common'
+import { ChampionDataMain } from '../champion-data'
 import { FeatureGatingMain } from '../feature-gating'
 import { AkariIpcMain } from '../ipc'
 import { LeagueClientMain } from '../league-client'
@@ -64,7 +65,8 @@ export class OngoingGameMain implements IAkariShardInitDispose {
     private readonly _sgpMain: SgpMain,
     private readonly _savedPlayer: SavedPlayerMain,
     private readonly _appCommon: AppCommonMain,
-    private readonly _featureGating: FeatureGatingMain
+    private readonly _featureGating: FeatureGatingMain,
+    private readonly _championDataMain: ChampionDataMain
   ) {
     this.settings = new OngoingGameSettings()
     this._logger = _loggerFactory.create(OngoingGameMain.id)
@@ -161,7 +163,8 @@ export class OngoingGameMain implements IAkariShardInitDispose {
       leagueClient: this._leagueClient,
       sgp: this._sgpMain,
       savedPlayer: this._savedPlayer,
-      featureGating: this._featureGating
+      featureGating: this._featureGating,
+      championData: this._championDataMain
     }
 
     this._matchHistory = new OngoingGameMatchHistoryLoader(this._context)
