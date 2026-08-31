@@ -298,6 +298,9 @@ ongoingGame:
       summary_one: '{{count}} game, {{rate}} win rate'
       summary_other: '{{count}} games, {{rate}} win rate'
       precautions:
+        championCounter: Frequently plays {{champion}}, which counters your champion
+        championCounterWithWinRate: Frequently plays {{champion}}, which counters your champion
+          ({{winRate}} win rate for your champion)
         losingStreak_one: On a {{count}}-game losing streak — may be tilted, consider applying pressure
         losingStreak_other: On a {{count}}-game losing streak — may be tilted, consider applying pressure
         winningStreak_one: On a {{count}}-game winning streak — in good form, play carefully

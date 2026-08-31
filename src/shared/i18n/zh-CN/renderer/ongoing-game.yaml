@@ -273,6 +273,8 @@ ongoingGame:
       summary_one: 近 {{count}} 场胜率 {{rate}}
       summary_other: 近 {{count}} 场胜率 {{rate}}
       precautions:
+        championCounter: 他常用 {{champion}}，克制你当前英雄
+        championCounterWithWinRate: 他常用 {{champion}}，克制你当前英雄（你的英雄对位胜率 {{winRate}}）
         losingStreak_one: 连败 {{count}} 场，心态可能不佳，可施压
         losingStreak_other: 连败 {{count}} 场，心态可能不佳，可施压
         winningStreak_one: 连胜 {{count}} 场，近期状态在线，小心应对

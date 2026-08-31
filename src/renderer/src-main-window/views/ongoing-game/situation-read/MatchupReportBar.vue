@@ -100,6 +100,7 @@ export const MATCHUP_REPORT_BAR_HEIGHT_PX = 52
 
 <script setup lang="ts">
 import { getTeamIndicatorColorClass } from '@renderer-shared/components/ongoing-game-panel/utils/theme'
+import { useAkariResourceProvider } from '@renderer-shared/providers/akari-resource'
 import { useOngoingGameStore } from '@renderer-shared/shards/ongoing-game/store'
 import { useTranslation } from 'i18next-vue'
 import { NScrollbar } from 'naive-ui'
@@ -108,6 +109,8 @@ import { computed } from 'vue'
 const { t } = useTranslation()
 
 const ongoingGameStore = useOngoingGameStore()
+
+const resources = useAkariResourceProvider()
 
 const matchupReport = computed(() => ongoingGameStore.situationRead?.matchupReport ?? null)
 
@@ -207,6 +210,15 @@ const precautionLabels = computed(() => {
 
   return precautions.map((precaution) => {
     switch (precaution.kind) {
+      case 'champion-counter': {
+        const champion = resources.champions.name(precaution.championId)
+        return precaution.winRate === null
+          ? t('ongoingGame.situationRead.matchup.precautions.championCounter', { champion })
+          : t('ongoingGame.situationRead.matchup.precautions.championCounterWithWinRate', {
+              champion,
+              winRate: formatRate(precaution.winRate)
+            })
+      }
       case 'losing-streak':
         return t('ongoingGame.situationRead.matchup.precautions.losingStreak', {
           count: precaution.count
