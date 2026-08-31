@@ -4,6 +4,7 @@ import type { ParsedRole } from '@shared/utils/ranked'
 
 export * from './reload'
 export * from './settings'
+export * from './situation-read'
 
 export interface OngoingGameAnalysis {
   players: Record<string, AggregatedAnalysis>
