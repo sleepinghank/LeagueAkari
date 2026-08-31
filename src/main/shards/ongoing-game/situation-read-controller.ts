@@ -36,6 +36,10 @@ export class OngoingGameSituationReadController {
         positionKeys: Object.entries(state.positionAssignments)
           .map(([puuid, assignment]) => `${puuid}:${assignment.position}`)
           .toSorted(),
+        premadeGroups: state.inferredPremadeTeams
+          .map((group) => [...group].toSorted().join(','))
+          .toSorted()
+          .join(';'),
         championRoleCount: Object.keys(this._context.leagueClient.data.gameData.champions).length,
         isSuperServerGame: this._isSuperServerGame()
       }),
@@ -94,7 +98,8 @@ export class OngoingGameSituationReadController {
           Object.entries(this._context.leagueClient.data.gameData.champions).map(
             ([championId, champion]) => [Number(championId), champion.roles]
           )
-        )
+        ),
+        premadeGroups: state.inferredPremadeTeams
       }
     })
   }

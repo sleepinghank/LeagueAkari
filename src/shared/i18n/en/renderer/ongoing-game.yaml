@@ -310,3 +310,15 @@ ongoingGame:
           Fighter: Frequently plays fighters — beware extended trades and sustain
           Tank: Frequently plays tanks — beware frontline engage
           Support: Frequently plays supports — beware peel and crowd control
+      jungleThreat:
+        insufficientData: Insufficient data on the enemy jungler
+        precautions:
+          earlyGank: High early gank rate (level 3 {{level3Rate}}, level 4 {{level4Rate}}) — ward
+            before pushing early
+          preferredLane: Prefers to gank {{lane}}
+          targetsSelf: Prefers to gank your lane ({{lane}}) — ward before pushing early
+          premadeLink: The opponent and the enemy jungler appear to be premade — beware coordinated
+            ganks
+      gankTargets:
+        title: Easiest enemy lanes to gank
+        stat: '{{value}} early deaths to jungle ganks per game'
