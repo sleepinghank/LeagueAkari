@@ -9,6 +9,9 @@ import type { RankedStats } from '@shared/types/league-client/ranked'
  * - 修正由近期胜率偏离与 Akari 评分合成，上限 ±1.5；
  * - 样本不足 5 场时修正按样本量向基线收缩；
  * - 无段位且无近期战绩时输出"数据不足"哨兵（score 为 null）。
+ *
+ * 对位专报（Matchup Report）：自动识别"我"的位置与同位置敌方对手，
+ * 产出最近表现摘要与模板化注意事项（近期状态 + 英雄粗分类规则）。
  */
 
 /** 未定级（无单双排段位）玩家的基线 */
@@ -71,6 +74,40 @@ const UNRANKED_TIERS = new Set(['NA', 'NONE', ''])
  */
 export const SUPER_SERVER_RSO_PLATFORM_ID = 'BGP2'
 
+/** 可识别并参与对位匹配的位置 */
+export const MATCHUP_POSITIONS = ['TOP', 'JUNGLE', 'MIDDLE', 'BOTTOM', 'UTILITY'] as const
+
+/** 连败达到该场数触发"心态可能不佳，可施压"提示 */
+export const MATCHUP_LOSING_STREAK_THRESHOLD = 3
+
+/** 连胜达到该场数触发"近期状态在线"提示 */
+export const MATCHUP_WINNING_STREAK_THRESHOLD = 3
+
+/** "近期状态火热"所需的最小近期胜率 */
+export const MATCHUP_HOT_STREAK_WIN_RATE = 0.6
+
+/** "近期状态火热"所需的最小近期平均 KDA */
+export const MATCHUP_HOT_STREAK_KDA = 4.0
+
+/** "近期状态火热"所需的最小近期场次（小样本不触发） */
+export const MATCHUP_HOT_STREAK_MIN_GAMES = 5
+
+/** 参与英雄粗分类判定的常用英雄数量 */
+export const MATCHUP_FREQUENT_CHAMPION_COUNT = 3
+
+/** 英雄至少使用该场数才视为"常用英雄" */
+export const MATCHUP_FREQUENT_CHAMPION_MIN_GAMES = 2
+
+/** LCU roles 粗分类 → 类型提示的固定顺序（文案键与此一致） */
+export const MATCHUP_ARCHETYPE_ORDER = [
+  'Assassin',
+  'Mage',
+  'Marksman',
+  'Fighter',
+  'Tank',
+  'Support'
+] as const
+
 export interface SituationReadRankedSolo {
   tier: string
   division: string
@@ -92,9 +129,51 @@ export interface SituationPlayerThreat {
   score: number | null
 }
 
+/**
+ * 对位专报的注意事项（特征标签 → 固定模板文案）。
+ * - 近期状态类：连败 / 连胜 / 高胜率高 KDA（状态平庸时不产生）
+ * - 英雄粗分类：对手常用英雄携带的 LCU roles 粗分类
+ */
+export type MatchupPrecaution =
+  | { kind: 'losing-streak'; count: number }
+  | { kind: 'winning-streak'; count: number }
+  | { kind: 'hot-streak'; winRate: number; kda: number }
+  | { kind: 'champion-archetype'; archetype: string }
+
+export interface MatchupReportOpponent {
+  puuid: string
+  teamIdentifier: string
+  /** 单双排段位；未定级或无数据为 null */
+  rankedSolo: SituationReadRankedSolo | null
+  /** 近期对局场次；无战绩为 null */
+  recentGameCount: number | null
+  /** 近期胜率；无战绩为 null */
+  recentWinRate: number | null
+  precautions: MatchupPrecaution[]
+}
+
+export interface MatchupReport {
+  /** 我的位置（TOP / JUNGLE / MIDDLE / BOTTOM / UTILITY） */
+  selfPosition: string
+  /** 同位置敌方对手；敌方无同位置玩家时为 null */
+  opponent: MatchupReportOpponent | null
+}
+
+/** 对位专报的计算上下文 */
+export interface MatchupReadContext {
+  /** 我的 puuid；无法识别为 null */
+  selfPuuid: string | null
+  /** puuid → 位置指派（选人或对局阶段）；值形如 TOP / NONE / FILL */
+  positionAssignments: Record<string, string>
+  /** championId → LCU 英雄数据自带的 roles 粗分类 */
+  championRoles: Record<number, readonly string[]>
+}
+
 export interface SituationRead {
   /** 全部玩家，按威胁分降序排列；数据不足的玩家排在末尾（保持输入顺序） */
   threatRankings: SituationPlayerThreat[]
+  /** 对位专报；身份 / 位置 / 对位者无法识别时为 null（小节隐藏） */
+  matchupReport: MatchupReport | null
 }
 
 /**
@@ -113,13 +192,15 @@ export function extractSoloRankedEntry(
 }
 
 /**
- * 计算局势研判结果（当前为敌我十人威胁分排行）。
+ * 计算局势研判结果（敌我十人威胁分排行 + 对位专报）。
  * 纯函数，不依赖 IPC / 网络。
  */
 export function computeSituationRead(options: {
   players: SituationReadPlayerInput[]
   /** 峡谷之巅超级服对局：单双排段位按王者档计算基线 */
   isSuperServerGame?: boolean
+  /** 对位专报上下文；缺省时不产出专报 */
+  matchup?: MatchupReadContext
 }): SituationRead {
   const threatRankings = options.players.map((player) => ({
     puuid: player.puuid,
@@ -133,8 +214,126 @@ export function computeSituationRead(options: {
       if (a.score === null) return 1
       if (b.score === null) return -1
       return b.score - a.score
-    })
+    }),
+    matchupReport: options.matchup ? computeMatchupReport(options.players, options.matchup) : null
   }
+}
+
+/**
+ * 对位专报：识别"我"的位置与同位置敌方对手，产出最近表现摘要与模板化注意事项。
+ * 身份、位置或对位者无法识别时返回 null（渲染层隐藏专报小节）。
+ */
+function computeMatchupReport(
+  players: SituationReadPlayerInput[],
+  context: MatchupReadContext
+): MatchupReport | null {
+  if (!context.selfPuuid) {
+    return null
+  }
+
+  const self = players.find((player) => player.puuid === context.selfPuuid)
+  if (!self) {
+    return null
+  }
+
+  const selfPosition = context.positionAssignments[context.selfPuuid] ?? ''
+  if (!(MATCHUP_POSITIONS as readonly string[]).includes(selfPosition)) {
+    return null
+  }
+
+  const opponent = players.find(
+    (player) =>
+      player.teamIdentifier !== self.teamIdentifier &&
+      context.positionAssignments[player.puuid] === selfPosition
+  )
+
+  if (!opponent) {
+    return null
+  }
+
+  return {
+    selfPosition,
+    opponent: {
+      puuid: opponent.puuid,
+      teamIdentifier: opponent.teamIdentifier,
+      rankedSolo: opponent.rankedSolo,
+      recentGameCount: opponent.analysis?.count ?? null,
+      recentWinRate: opponent.analysis ? opponent.analysis.summary.winRate : null,
+      precautions: computeMatchupPrecautions(opponent.analysis, context.championRoles)
+    }
+  }
+}
+
+/**
+ * 注意事项规则：近期状态（连败 / 连胜 / 高胜率高 KDA，互斥取最强信号）+ 常用英雄粗分类。
+ * 状态平庸时不产出状态类提示。
+ */
+function computeMatchupPrecautions(
+  analysis: AggregatedAnalysis | null,
+  championRoles: Record<number, readonly string[]>
+): MatchupPrecaution[] {
+  if (!analysis) {
+    return []
+  }
+
+  const precautions: MatchupPrecaution[] = []
+  const recentForm = getRecentFormPrecaution(analysis)
+
+  if (recentForm) {
+    precautions.push(recentForm)
+  }
+
+  precautions.push(...getChampionArchetypePrecautions(analysis, championRoles))
+
+  return precautions
+}
+
+/** 近期状态规则；连败 > 连胜 > 状态火热，三者互斥 */
+function getRecentFormPrecaution(analysis: AggregatedAnalysis): MatchupPrecaution | null {
+  const normal = analysis.winLoss.normal
+
+  if (normal.losingStreak >= MATCHUP_LOSING_STREAK_THRESHOLD) {
+    return { kind: 'losing-streak', count: normal.losingStreak }
+  }
+
+  if (normal.winningStreak >= MATCHUP_WINNING_STREAK_THRESHOLD) {
+    return { kind: 'winning-streak', count: normal.winningStreak }
+  }
+
+  if (
+    analysis.count >= MATCHUP_HOT_STREAK_MIN_GAMES &&
+    analysis.summary.winRate >= MATCHUP_HOT_STREAK_WIN_RATE &&
+    analysis.summary.avgKda >= MATCHUP_HOT_STREAK_KDA
+  ) {
+    return { kind: 'hot-streak', winRate: analysis.summary.winRate, kda: analysis.summary.avgKda }
+  }
+
+  return null
+}
+
+/** 英雄粗分类规则：对手常用英雄携带的 LCU roles 粗分类 → 类型提示（固定顺序去重） */
+function getChampionArchetypePrecautions(
+  analysis: AggregatedAnalysis,
+  championRoles: Record<number, readonly string[]>
+): MatchupPrecaution[] {
+  const frequentChampionIds = Object.values(analysis.champions)
+    .filter((champion) => champion.winLoss.all.count >= MATCHUP_FREQUENT_CHAMPION_MIN_GAMES)
+    .toSorted((a, b) => b.winLoss.all.count - a.winLoss.all.count)
+    .slice(0, MATCHUP_FREQUENT_CHAMPION_COUNT)
+    .map((champion) => champion.championId)
+
+  const archetypes = new Set<string>()
+  for (const championId of frequentChampionIds) {
+    for (const role of championRoles[championId] ?? []) {
+      if ((MATCHUP_ARCHETYPE_ORDER as readonly string[]).includes(role)) {
+        archetypes.add(role)
+      }
+    }
+  }
+
+  return MATCHUP_ARCHETYPE_ORDER.filter((archetype) => archetypes.has(archetype)).map(
+    (archetype) => ({ kind: 'champion-archetype' as const, archetype })
+  )
 }
 
 function computeThreatScore(player: SituationReadPlayerInput, isSuperServerGame: boolean) {
