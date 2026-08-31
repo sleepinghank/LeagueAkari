@@ -16,7 +16,7 @@ export class OngoingGameSituationReadController {
   constructor(private readonly _context: OngoingGameMainContext) {}
 
   watch() {
-    const { mobxUtils, state } = this._context
+    const { leagueClient, mobxUtils, state } = this._context
 
     mobxUtils.reaction(
       () => ({
@@ -32,6 +32,7 @@ export class OngoingGameSituationReadController {
               }`
           )
           .toSorted(),
+        selfPuuid: leagueClient.data.summoner.me?.puuid ?? null,
         isSuperServerGame: this._isSuperServerGame()
       }),
       () => {
@@ -72,7 +73,22 @@ export class OngoingGameSituationReadController {
 
     return computeSituationRead({
       players,
+      selfTeamIdentifier: this._getSelfTeamIdentifier(),
       isSuperServerGame: this._isSuperServerGame()
     })
+  }
+
+  /** 我方队伍：本地玩家所在队伍；未找到时返回 null（不产出头号卡） */
+  private _getSelfTeamIdentifier(): string | null {
+    const selfPuuid = this._context.leagueClient.data.summoner.me?.puuid
+    if (!selfPuuid) {
+      return null
+    }
+
+    const selfTeam = Object.entries(this._context.state.teams).find(([, puuids]) =>
+      puuids.includes(selfPuuid)
+    )
+
+    return selfTeam?.[0] ?? null
   }
 }

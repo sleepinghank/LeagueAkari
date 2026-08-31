@@ -293,3 +293,12 @@ ongoingGame:
   situationRead:
     title: Situation Read
     insufficientData: Insufficient data
+    topThreatLabel: Enemy Top Threat
+    keyCarryLabel: Ally Key Carry
+    secondaryThreat: 'Secondary threat: {name} ({score})'
+    secondaryCarry: 'Secondary carry: {name} ({score})'
+    basisRecentWithRank_one: '{rank} · {winRate}% WR in {count} recent game'
+    basisRecentWithRank_other: '{rank} · {winRate}% WR in {count} recent games'
+    basisRecentOnly_one: '{winRate}% WR in {count} recent game'
+    basisRecentOnly_other: '{winRate}% WR in {count} recent games'
+    openDetailHint: Click to open full analysis
