@@ -10,7 +10,8 @@ import type {
   OngoingGamePanelOrderPlayerBy,
   OngoingGamePanelPlayerCardTagSettings,
   OngoingGameSettingsData,
-  OngoingGameSimplifiedChampMastery
+  OngoingGameSimplifiedChampMastery,
+  SituationRead
 } from '@shared/shards/ongoing-game'
 import { createDefaultOngoingGamePanelPlayerCardTagSettings } from '@shared/shards/ongoing-game/settings'
 import type { SavedInfo } from '@shared/shards/saved-player'
@@ -221,6 +222,12 @@ export class OngoingGameState {
     this.analysis = value
   }
 
+  situationRead: SituationRead | null = null
+
+  setSituationRead(value: SituationRead | null) {
+    this.situationRead = value
+  }
+
   matchHistoryTagParams: Pick<MatchHistoryQueryParams, 'tag' | 'tagsQueryType'> = {}
 
   setMatchHistoryTagParams(value: Pick<MatchHistoryQueryParams, 'tag' | 'tagsQueryType'>) {
@@ -270,6 +277,7 @@ export class OngoingGameState {
 
   clear(options?: { keepTagParams?: boolean; keepAdditionalInfo?: boolean }) {
     this.analysis = null
+    this.situationRead = null
     this.matchHistory = {}
     this.summoner = {}
     this.savedInfo = {}
@@ -393,6 +401,7 @@ export class OngoingGameState {
       positionAssignments: computedStruct,
       teams: computedStruct,
       analysis: observableStruct,
+      situationRead: observableStruct,
       queryStage: computedStruct,
       teamParticipantGroups: computedStruct,
       draft: observableStruct,

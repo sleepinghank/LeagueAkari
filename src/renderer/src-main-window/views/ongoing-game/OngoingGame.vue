@@ -1,5 +1,5 @@
 <template>
-  <div class="h-full">
+  <div class="flex h-full flex-col">
     <ConnectedMatchPreviewer
       v-model:show="showPreviewModal"
       :game-id="previewingGame.gameId"
@@ -12,10 +12,12 @@
       @navigate-to-summoner-by-puuid="navigateToTabByPuuid"
       @dry-run-ongoing-game="handleDryRunOngoingGame"
     />
+    <SituationReadCard v-if="hasSituationRead" @navigate="navigateToTabByPuuid" />
+    <MatchupReportBar v-if="hasMatchupReport" />
     <OngoingGameProvider :value="ongoingGame">
       <OngoingGamePanel
         :content-width="contentWidth"
-        :content-height="contentHeight"
+        :content-height="panelContentHeight"
         @navigate-to-summoner-by-puuid="navigateToTabByPuuid"
         @preview-game="handlePreviewGame"
       />
@@ -38,13 +40,23 @@ import {
 import { useInstance } from '@renderer-shared/shards'
 import { useAppCommonStore } from '@renderer-shared/shards/app-common/store'
 import { OngoingGameRenderer } from '@renderer-shared/shards/ongoing-game'
+import { useOngoingGameStore } from '@renderer-shared/shards/ongoing-game/store'
 import { DraftOptions } from '@shared/shards/ongoing-game'
-import { ref, shallowRef } from 'vue'
+import { computed, ref, shallowRef } from 'vue'
 
 import { useMainWindowAppContext } from '@main-window/context'
 import { PlayerTabsRenderer } from '@main-window/shards/player-tabs'
+import MatchupReportBar, {
+  MATCHUP_REPORT_BAR_HEIGHT_PX
+} from './situation-read/MatchupReportBar.vue'
+import SituationReadCard, {
+  SITUATION_READ_CARD_HEIGHT_PX,
+  SITUATION_READ_RANKING_ROW_HEIGHT_PX
+} from './situation-read/SituationReadCard.vue'
 
 const { contentWidth, contentHeight } = useMainWindowAppContext()
+
+const ongoingGameStore = useOngoingGameStore()
 
 const pt = useInstance(PlayerTabsRenderer)
 const og = useInstance(OngoingGameRenderer)
@@ -69,4 +81,29 @@ const handleDryRunOngoingGame = async (draft: DraftOptions) => {
   await og.setDraft(draft)
   showPreviewModal.value = false
 }
+
+const hasSituationRead = computed(() => {
+  return (ongoingGameStore.situationRead?.threatRankings?.length ?? 0) > 0
+})
+
+const hasMatchupReport = computed(() => {
+  return ongoingGameStore.situationRead?.matchupReport != null
+})
+
+const panelContentHeight = computed(() => {
+  let reservedHeight = 0
+  if (hasSituationRead.value) {
+    const hasHighlightCards = Boolean(
+      ongoingGameStore.situationRead?.topThreat || ongoingGameStore.situationRead?.keyCarry
+    )
+    reservedHeight += hasHighlightCards
+      ? SITUATION_READ_CARD_HEIGHT_PX
+      : SITUATION_READ_RANKING_ROW_HEIGHT_PX
+  }
+  if (hasMatchupReport.value) {
+    reservedHeight += MATCHUP_REPORT_BAR_HEIGHT_PX
+  }
+
+  return Math.max(0, contentHeight.value - reservedHeight)
+})
 </script>

@@ -265,3 +265,58 @@ ongoingGame:
     disabled: 对局页面已禁用，请在设置中重新启用此功能
     avgTeamWinRate: 队伍平均胜率
     avgTeamKda: 队伍平均 KDA
+  situationRead:
+    title: 局势研判
+    insufficientData: 数据不足
+    topThreatLabel: 敌方头号威胁
+    keyCarryLabel: 我方核心大腿
+    secondaryThreat: '次级威胁 {{name}} {{score}}'
+    secondaryCarry: '次级核心 {{name}} {{score}}'
+    basisRecentWithRank_one: '{{rank}} · 近 {{count}} 场胜率 {{winRate}}%'
+    basisRecentWithRank_other: '{{rank}} · 近 {{count}} 场胜率 {{winRate}}%'
+    basisRecentOnly_one: '近 {{count}} 场胜率 {{winRate}}%'
+    basisRecentOnly_other: '近 {{count}} 场胜率 {{winRate}}%'
+    openDetailHint: 点击查看完整分析
+    featureTags:
+      losingStreak_one: '{{count}} 连败'
+      losingStreak_other: '{{count}} 连败'
+      winningStreak_one: '{{count}} 连胜'
+      winningStreak_other: '{{count}} 连胜'
+      highWinRate: 极高胜率
+      favoriteChampion: '常用 {{champion}}'
+      kdaStable: 发挥稳定
+      kdaVolatile: 状态起伏
+      gankSensitiveEasy: 好抓
+      gankSensitiveVeryEasy: 非常好抓
+      suspiciousFlash: 闪现异位
+      premade_one: '预组队 {{count}} 人'
+      premade_other: '预组队 {{count}} 人'
+    matchup:
+      title: 对位专报
+      summary_one: 近 {{count}} 场胜率 {{rate}}
+      summary_other: 近 {{count}} 场胜率 {{rate}}
+      precautions:
+        championCounter: 他常用 {{champion}}，克制你当前英雄
+        championCounterWithWinRate: 他常用 {{champion}}，克制你当前英雄（你的英雄对位胜率 {{winRate}}）
+        losingStreak_one: 连败 {{count}} 场，心态可能不佳，可施压
+        losingStreak_other: 连败 {{count}} 场，心态可能不佳，可施压
+        winningStreak_one: 连胜 {{count}} 场，近期状态在线，小心应对
+        winningStreak_other: 连胜 {{count}} 场，近期状态在线，小心应对
+        hotStreak: 近期状态火热（胜率 {{winRate}}、KDA {{kda}}）
+        archetype:
+          Assassin: 常用英雄含刺客，注意爆发伤害
+          Mage: 常用英雄含法师，注意远程消耗
+          Marksman: 常用英雄含射手，注意持续输出与后期成长
+          Fighter: 常用英雄含战士，注意近身缠斗与回复
+          Tank: 常用英雄含坦克，注意前排开团
+          Support: 常用英雄含辅助，注意保护与控制
+      jungleThreat:
+        insufficientData: 敌方打野数据不足
+        precautions:
+          earlyGank: 3/4 级 gank 率高（3 级 {{level3Rate}}、4 级 {{level4Rate}}），前几分钟压线需插眼
+          preferredLane: 偏好 gank {{lane}}
+          targetsSelf: 偏爱 gank 你所在的{{lane}}，前几分钟压线需插眼
+          premadeLink: 对位者与敌方打野疑似预组队，警惕联动 gank
+      gankTargets:
+        title: 敌方各路易被抓
+        stat: 场均前期被 gank 死亡 {{value}}

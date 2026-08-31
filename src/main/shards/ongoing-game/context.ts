@@ -1,5 +1,6 @@
 import type { QueueKeeper } from '@shared/utils/queue-keeper'
 
+import type { ChampionDataMain } from '../champion-data'
 import type { FeatureGatingMain } from '../feature-gating'
 import type { AkariIpcMain } from '../ipc'
 import type { LeagueClientMain } from '../league-client'
@@ -37,4 +38,5 @@ export interface OngoingGameMainContext {
   sgp: SgpMain
   savedPlayer: SavedPlayerMain
   featureGating: FeatureGatingMain
+  championData: ChampionDataMain
 }

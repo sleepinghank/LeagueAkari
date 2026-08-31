@@ -4,6 +4,7 @@ import { compareShallow } from 'mobx'
 import { z } from 'zod'
 
 import { AppCommonMain } from '../app-common'
+import { ChampionDataMain } from '../champion-data'
 import { FeatureGatingMain } from '../feature-gating'
 import { AkariIpcMain } from '../ipc'
 import { LeagueClientMain } from '../league-client'
@@ -26,6 +27,7 @@ import { OngoingGameMatchHistoryLoader } from './match-history-loader'
 import { OngoingGamePlayerDataLoader } from './player-data-loader'
 import { ongoingGamePlayerCardTagsSchema } from './setting-schemas'
 import { OngoingGameSideEffectsController } from './side-effects-controller'
+import { OngoingGameSituationReadController } from './situation-read-controller'
 import { OngoingGameSettings, OngoingGameState } from './state'
 
 /**
@@ -51,6 +53,7 @@ export class OngoingGameMain implements IAkariShardInitDispose {
   private readonly _additionalInfo: OngoingGameAdditionalInfoController
   private readonly _sideEffects: OngoingGameSideEffectsController
   private readonly _champSelectHandoff: OngoingGameChampSelectHandoffController
+  private readonly _situationRead: OngoingGameSituationReadController
   private readonly _ipcHandlers: OngoingGameIpcHandlers
 
   constructor(
@@ -62,7 +65,8 @@ export class OngoingGameMain implements IAkariShardInitDispose {
     private readonly _sgpMain: SgpMain,
     private readonly _savedPlayer: SavedPlayerMain,
     private readonly _appCommon: AppCommonMain,
-    private readonly _featureGating: FeatureGatingMain
+    private readonly _featureGating: FeatureGatingMain,
+    private readonly _championDataMain: ChampionDataMain
   ) {
     this.settings = new OngoingGameSettings()
     this._logger = _loggerFactory.create(OngoingGameMain.id)
@@ -159,7 +163,8 @@ export class OngoingGameMain implements IAkariShardInitDispose {
       leagueClient: this._leagueClient,
       sgp: this._sgpMain,
       savedPlayer: this._savedPlayer,
-      featureGating: this._featureGating
+      featureGating: this._featureGating,
+      championData: this._championDataMain
     }
 
     this._matchHistory = new OngoingGameMatchHistoryLoader(this._context)
@@ -168,6 +173,7 @@ export class OngoingGameMain implements IAkariShardInitDispose {
     this._additionalInfo = new OngoingGameAdditionalInfoController(this._context)
     this._sideEffects = new OngoingGameSideEffectsController(this._context)
     this._champSelectHandoff = new OngoingGameChampSelectHandoffController(this._context)
+    this._situationRead = new OngoingGameSituationReadController(this._context)
     this._ipcHandlers = new OngoingGameIpcHandlers(
       this._context,
       this._matchHistory,
@@ -199,6 +205,7 @@ export class OngoingGameMain implements IAkariShardInitDispose {
       'championSelections',
       'positionAssignments',
       'analysis',
+      'situationRead',
       'queryStage',
       'teams',
       'isInEog',
@@ -227,6 +234,7 @@ export class OngoingGameMain implements IAkariShardInitDispose {
     this._ipcHandlers.register()
     this._champSelectHandoff.watch()
     this._analysis.watch()
+    this._situationRead.watch()
     this._sideEffects.watch()
     this._playerData.watch()
     this._matchHistory.watch()
