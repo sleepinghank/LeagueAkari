@@ -270,12 +270,12 @@ ongoingGame:
     insufficientData: 数据不足
     topThreatLabel: 敌方头号威胁
     keyCarryLabel: 我方核心大腿
-    secondaryThreat: '次级威胁 {name} {score}'
-    secondaryCarry: '次级核心 {name} {score}'
-    basisRecentWithRank_one: '{rank} · 近 {count} 场胜率 {winRate}%'
-    basisRecentWithRank_other: '{rank} · 近 {count} 场胜率 {winRate}%'
-    basisRecentOnly_one: '近 {count} 场胜率 {winRate}%'
-    basisRecentOnly_other: '近 {count} 场胜率 {winRate}%'
+    secondaryThreat: '次级威胁 {{name}} {{score}}'
+    secondaryCarry: '次级核心 {{name}} {{score}}'
+    basisRecentWithRank_one: '{{rank}} · 近 {{count}} 场胜率 {{winRate}}%'
+    basisRecentWithRank_other: '{{rank}} · 近 {{count}} 场胜率 {{winRate}}%'
+    basisRecentOnly_one: '近 {{count}} 场胜率 {{winRate}}%'
+    basisRecentOnly_other: '近 {{count}} 场胜率 {{winRate}}%'
     openDetailHint: 点击查看完整分析
     featureTags:
       losingStreak_one: '{{count}} 连败'
