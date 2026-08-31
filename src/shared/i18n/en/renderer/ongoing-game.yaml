@@ -293,3 +293,20 @@ ongoingGame:
   situationRead:
     title: Situation Read
     insufficientData: Insufficient data
+    matchup:
+      title: Matchup Report
+      summary_one: '{{count}} game, {{rate}} win rate'
+      summary_other: '{{count}} games, {{rate}} win rate'
+      precautions:
+        losingStreak_one: On a {{count}}-game losing streak — may be tilted, consider applying pressure
+        losingStreak_other: On a {{count}}-game losing streak — may be tilted, consider applying pressure
+        winningStreak_one: On a {{count}}-game winning streak — in good form, play carefully
+        winningStreak_other: On a {{count}}-game winning streak — in good form, play carefully
+        hotStreak: 'In hot form ({{winRate}} win rate, {{kda}} KDA)'
+        archetype:
+          Assassin: Frequently plays assassins — beware burst damage
+          Mage: Frequently plays mages — beware long-range poke
+          Marksman: Frequently plays marksmen — beware sustained damage and scaling
+          Fighter: Frequently plays fighters — beware extended trades and sustain
+          Tank: Frequently plays tanks — beware frontline engage
+          Support: Frequently plays supports — beware peel and crowd control

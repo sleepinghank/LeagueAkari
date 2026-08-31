@@ -10,7 +10,7 @@ import { compareStructural } from 'mobx'
 import type { OngoingGameMainContext } from './context'
 
 /**
- * 局势研判：在既有玩家聚合分析与段位数据的基础上，计算威胁分排行并同步到状态。
+ * 局势研判：在既有玩家聚合分析与段位数据的基础上，计算威胁分排行与对位专报并同步到状态。
  */
 export class OngoingGameSituationReadController {
   constructor(private readonly _context: OngoingGameMainContext) {}
@@ -32,6 +32,11 @@ export class OngoingGameSituationReadController {
               }`
           )
           .toSorted(),
+        selfPuuid: this._getSelfPuuid() ?? '',
+        positionKeys: Object.entries(state.positionAssignments)
+          .map(([puuid, assignment]) => `${puuid}:${assignment.position}`)
+          .toSorted(),
+        championRoleCount: Object.keys(this._context.leagueClient.data.gameData.champions).length,
         isSuperServerGame: this._isSuperServerGame()
       }),
       () => {
@@ -43,6 +48,10 @@ export class OngoingGameSituationReadController {
 
   private _isSuperServerGame() {
     return this._context.leagueClient.state.auth?.rsoPlatformId === SUPER_SERVER_RSO_PLATFORM_ID
+  }
+
+  private _getSelfPuuid() {
+    return this._context.leagueClient.data.summoner.me?.puuid ?? null
   }
 
   private _computeSituationRead(): SituationRead | null {
@@ -72,7 +81,21 @@ export class OngoingGameSituationReadController {
 
     return computeSituationRead({
       players,
-      isSuperServerGame: this._isSuperServerGame()
+      isSuperServerGame: this._isSuperServerGame(),
+      matchup: {
+        selfPuuid: this._getSelfPuuid(),
+        positionAssignments: Object.fromEntries(
+          Object.entries(state.positionAssignments).map(([puuid, assignment]) => [
+            puuid,
+            assignment.position
+          ])
+        ),
+        championRoles: Object.fromEntries(
+          Object.entries(this._context.leagueClient.data.gameData.champions).map(
+            ([championId, champion]) => [Number(championId), champion.roles]
+          )
+        )
+      }
     })
   }
 }

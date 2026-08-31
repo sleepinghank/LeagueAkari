@@ -13,6 +13,7 @@
       @dry-run-ongoing-game="handleDryRunOngoingGame"
     />
     <SituationReadCard v-if="hasSituationRead" />
+    <MatchupReportBar v-if="hasMatchupReport" />
     <OngoingGameProvider :value="ongoingGame">
       <OngoingGamePanel
         :content-width="contentWidth"
@@ -45,6 +46,9 @@ import { computed, ref, shallowRef } from 'vue'
 
 import { useMainWindowAppContext } from '@main-window/context'
 import { PlayerTabsRenderer } from '@main-window/shards/player-tabs'
+import MatchupReportBar, {
+  MATCHUP_REPORT_BAR_HEIGHT_PX
+} from './situation-read/MatchupReportBar.vue'
 import SituationReadCard, {
   SITUATION_READ_CARD_HEIGHT_PX
 } from './situation-read/SituationReadCard.vue'
@@ -81,11 +85,19 @@ const hasSituationRead = computed(() => {
   return (ongoingGameStore.situationRead?.threatRankings?.length ?? 0) > 0
 })
 
+const hasMatchupReport = computed(() => {
+  return ongoingGameStore.situationRead?.matchupReport != null
+})
+
 const panelContentHeight = computed(() => {
-  if (!hasSituationRead.value) {
-    return contentHeight.value
+  let reservedHeight = 0
+  if (hasSituationRead.value) {
+    reservedHeight += SITUATION_READ_CARD_HEIGHT_PX
+  }
+  if (hasMatchupReport.value) {
+    reservedHeight += MATCHUP_REPORT_BAR_HEIGHT_PX
   }
 
-  return Math.max(0, contentHeight.value - SITUATION_READ_CARD_HEIGHT_PX)
+  return Math.max(0, contentHeight.value - reservedHeight)
 })
 </script>
