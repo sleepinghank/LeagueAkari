@@ -5,7 +5,8 @@ import { describe, expect, it } from 'vitest'
 import {
   type SituationReadPlayerInput,
   computeSituationRead,
-  extractSoloRankedEntry
+  extractSoloRankedEntry,
+  selectFeatureTags
 } from './situation-read'
 
 function createAnalysis(options: {
@@ -13,81 +14,92 @@ function createAnalysis(options: {
   winRate: number
   akariScoreTotal?: number
   akariScoreMax?: number
+  winningStreak?: number
+  losingStreak?: number
+  kdaCv?: number
+  flashOnD?: number
+  flashOnF?: number
+  /** 提供数字时视为有 details 样本；undefined / null 表示无 */
+  earlyDeathsWithEnemyJunglerInvolved?: number | null
+  champions?: { championId: number; games: number }[]
 }): AggregatedAnalysis {
-  return {
+  const createWinLossEntry = (count: number, winRate: number) => ({
+    count,
+    activeSessionWins: 0,
+    activeSessionLosses: 0,
+    wins: 0,
+    losses: 0,
+    winRate,
+    winningStreak: options.winningStreak ?? 0,
+    losingStreak: options.losingStreak ?? 0
+  })
+
+  const summary: AggregatedAnalysis['summary'] = {
+    avgChampionDamageRatioToTeamMax: 0,
+    avgChampionDamageRatioToMax: 0,
+    avgChampionDamagePercentageOfTeam: 0,
+    avgChampionDamagePerMinute: 0,
+    avgDamageTakenRatioToTeamMax: 0,
+    avgDamageTakenRatioToMax: 0,
+    avgDamageTakenPercentageOfTeam: 0,
+    avgGoldRatioToTeamMax: 0,
+    avgGoldRatioToMax: 0,
+    avgGoldPercentageOfTeam: 0,
+    avgCsRatioToTeamMax: 0,
+    avgCsRatioToMax: 0,
+    avgCsPercentageOfTeam: 0,
+    avgCsPerMinute: 0,
+    avgTowerDamageRatioToTeamMax: 0,
+    avgTowerDamageRatioToMax: 0,
+    avgTowerDamagePercentageOfTeam: 0,
+    avgVisionScore: 0,
+    avgVisionScorePercentageOfTeam: 0,
+    avgDamageGoldEfficiency: 0,
+    avgKillParticipation: 0,
+    avgKillDamageEfficiency: 0,
+    kills: 0,
+    deaths: 0,
+    assists: 0,
+    avgKda: 0,
+    // 未指定时落在稳定/起伏判定的中间带，表示"无 KDA 稳定性信号"
+    kdaCv: options.kdaCv ?? 0.5,
+    winRate: options.winRate,
+    avgSoloKills: null,
+    avgEnemyMissingPings: null,
+    avgPings: null
+  }
+
+  const akariScore: AggregatedAnalysis['akariScore'] = {
+    kdaScore: 0,
+    winRateScore: 0,
+    dmgScore: 0,
+    dmgTakenScore: 0,
+    healingScore: 0,
+    csScore: 0,
+    goldScore: 0,
+    participationScore: 0,
+    visionScore: 0,
+    total: options.akariScoreTotal ?? 0,
+    maxScore: options.akariScoreMax ?? 17,
+    outstanding: false,
+    extraordinary: false
+  }
+
+  const analysis: AggregatedAnalysis = {
     count: options.count,
-    summary: {
-      avgChampionDamageRatioToTeamMax: 0,
-      avgChampionDamageRatioToMax: 0,
-      avgChampionDamagePercentageOfTeam: 0,
-      avgChampionDamagePerMinute: 0,
-      avgDamageTakenRatioToTeamMax: 0,
-      avgDamageTakenRatioToMax: 0,
-      avgDamageTakenPercentageOfTeam: 0,
-      avgGoldRatioToTeamMax: 0,
-      avgGoldRatioToMax: 0,
-      avgGoldPercentageOfTeam: 0,
-      avgCsRatioToTeamMax: 0,
-      avgCsRatioToMax: 0,
-      avgCsPercentageOfTeam: 0,
-      avgCsPerMinute: 0,
-      avgTowerDamageRatioToTeamMax: 0,
-      avgTowerDamageRatioToMax: 0,
-      avgTowerDamagePercentageOfTeam: 0,
-      avgVisionScore: 0,
-      avgVisionScorePercentageOfTeam: 0,
-      avgDamageGoldEfficiency: 0,
-      avgKillParticipation: 0,
-      avgKillDamageEfficiency: 0,
-      kills: 0,
-      deaths: 0,
-      assists: 0,
-      avgKda: 0,
-      kdaCv: 0,
-      winRate: options.winRate,
-      avgSoloKills: null,
-      avgEnemyMissingPings: null,
-      avgPings: null
-    },
-    details: null,
-    akariScore: {
-      kdaScore: 0,
-      winRateScore: 0,
-      dmgScore: 0,
-      dmgTakenScore: 0,
-      healingScore: 0,
-      csScore: 0,
-      goldScore: 0,
-      participationScore: 0,
-      visionScore: 0,
-      total: options.akariScoreTotal ?? 0,
-      maxScore: options.akariScoreMax ?? 17,
-      outstanding: false,
-      extraordinary: false
-    },
+    summary,
+    details:
+      typeof options.earlyDeathsWithEnemyJunglerInvolved === 'number'
+        ? {
+            avgEarlyDeathsWithEnemyJunglerInvolved: options.earlyDeathsWithEnemyJunglerInvolved
+          }
+        : null,
+    akariScore,
     map: {},
     teamSide: { redSideCount: 0, blueSideCount: 0 },
     winLoss: {
-      all: {
-        count: options.count,
-        activeSessionWins: 0,
-        activeSessionLosses: 0,
-        wins: 0,
-        losses: 0,
-        winRate: options.winRate,
-        winningStreak: 0,
-        losingStreak: 0
-      },
-      normal: {
-        count: options.count,
-        activeSessionWins: 0,
-        activeSessionLosses: 0,
-        wins: 0,
-        losses: 0,
-        winRate: options.winRate,
-        winningStreak: 0,
-        losingStreak: 0
-      },
+      all: createWinLossEntry(options.count, options.winRate),
+      normal: createWinLossEntry(options.count, options.winRate),
       cherry: {
         count: 0,
         activeSessionWins: 0,
@@ -104,12 +116,48 @@ function createAnalysis(options: {
         avgSubteamPlacement: 0
       }
     },
-    spells: { flashOnD: 0, flashOnF: 0 },
+    spells: {
+      flashOnD: options.flashOnD ?? 0,
+      flashOnF: options.flashOnF ?? 0
+    },
     positions: null,
-    champions: {},
+    champions: Object.fromEntries(
+      (options.champions ?? []).map(({ championId, games }) => [
+        championId,
+        {
+          championId,
+          summary,
+          winLoss: {
+            all: createWinLossEntry(games, options.winRate),
+            normal: createWinLossEntry(games, options.winRate),
+            cherry: {
+              count: 0,
+              activeSessionWins: 0,
+              activeSessionLosses: 0,
+              wins: 0,
+              losses: 0,
+              winRate: 0,
+              winningStreak: 0,
+              losingStreak: 0,
+              top1s: 0,
+              topHalfFinishes: 0,
+              top1Rate: 0,
+              topHalfRate: 0,
+              avgSubteamPlacement: 0
+            }
+          },
+          akariScore,
+          positions: null,
+          jungle: null
+        }
+      ])
+    ),
     jungle: null,
-    detailsCount: 0
+    detailsCount:
+      typeof options.earlyDeathsWithEnemyJunglerInvolved === 'number' ? options.count : 0
   }
+
+  return analysis
 }
 
 function createPlayer(
@@ -416,5 +464,205 @@ describe('computeSituationRead top threat and key carry', () => {
     expect(result.topThreat).toBeNull()
     expect(result.keyCarry).toBeNull()
     expect(result.threatRankings).toHaveLength(2)
+  })
+})
+
+interface FeatureTagSignals {
+  count?: number
+  winRate?: number
+  winningStreak?: number
+  losingStreak?: number
+  kdaCv?: number
+  flashOnD?: number
+  flashOnF?: number
+  gankTimes?: number
+  champions?: { championId: number; games: number }[]
+  premadeGroupSize?: number | null
+  noAnalysis?: boolean
+}
+
+function selectTagsFromSignals(signals: FeatureTagSignals) {
+  return selectFeatureTags({
+    analysis: signals.noAnalysis
+      ? null
+      : createAnalysis({
+          count: signals.count ?? 10,
+          winRate: signals.winRate ?? 0.5,
+          winningStreak: signals.winningStreak,
+          losingStreak: signals.losingStreak,
+          kdaCv: signals.kdaCv,
+          flashOnD: signals.flashOnD,
+          flashOnF: signals.flashOnF,
+          earlyDeathsWithEnemyJunglerInvolved: signals.gankTimes,
+          champions: signals.champions
+        }),
+    premadeGroupSize: signals.premadeGroupSize ?? null
+  })
+}
+
+describe('selectFeatureTags priority and cap', () => {
+  it.each([
+    [
+      'keeps high priority signals ahead of lower ones',
+      {
+        losingStreak: 5,
+        champions: [{ championId: 266, games: 8 }],
+        kdaCv: 0.9,
+        gankTimes: 1.6,
+        premadeGroupSize: 2
+      },
+      ['losing-streak', 'favorite-champion', 'kda-stability']
+    ],
+    [
+      'fills the remaining slots with lower categories',
+      {
+        kdaCv: 0.2,
+        gankTimes: 1.6,
+        premadeGroupSize: 2
+      },
+      ['kda-stability', 'gank-sensitive', 'premade']
+    ],
+    [
+      'chooses gank sensitivity over flash position within the same category',
+      { gankTimes: 1.6, flashOnD: 3, flashOnF: 2 },
+      ['gank-sensitive']
+    ],
+    [
+      'shows the flash tag only without gank sensitivity',
+      { flashOnD: 3, flashOnF: 2 },
+      ['suspicious-flash']
+    ],
+    ['returns no tags without any signal', {}, []],
+    ['returns no tags without analysis', { noAnalysis: true }, []],
+    [
+      'shows the premade tag without analysis',
+      { noAnalysis: true, premadeGroupSize: 3 },
+      ['premade']
+    ]
+  ])('%s', (_, signals, expectedTypes) => {
+    expect(selectTagsFromSignals(signals).map((tag) => tag.type)).toEqual(expectedTypes)
+  })
+})
+
+describe('selectFeatureTags signal boundaries', () => {
+  it.each([
+    ['qualifies a losing streak of 3', { losingStreak: 3 }, ['losing-streak']],
+    ['rejects a losing streak of 2', { losingStreak: 2 }, []],
+    ['qualifies a winning streak of 3', { winningStreak: 3 }, ['winning-streak']],
+    [
+      'qualifies the very high win rate at 16 games and 85%',
+      { count: 16, winRate: 0.85 },
+      ['high-win-rate']
+    ],
+    ['rejects the very high win rate below 16 games', { count: 15, winRate: 0.9 }, []],
+    ['rejects the very high win rate below 85%', { count: 20, winRate: 0.84 }, []],
+    [
+      'qualifies a favorite champion with 3 games and a 30% share',
+      { champions: [{ championId: 266, games: 3 }], count: 10 },
+      ['favorite-champion']
+    ],
+    [
+      'rejects a favorite champion with fewer than 3 games',
+      { champions: [{ championId: 266, games: 2 }], count: 3 },
+      []
+    ],
+    [
+      'rejects a favorite champion below a 30% share',
+      { champions: [{ championId: 266, games: 3 }], count: 11 },
+      []
+    ],
+    ['qualifies stable kda at cv 0.35', { kdaCv: 0.35, count: 5 }, ['kda-stability']],
+    ['qualifies volatile kda at cv 0.8', { kdaCv: 0.8, count: 5 }, ['kda-stability']],
+    ['rejects kda tags in the middle band', { kdaCv: 0.5, count: 10 }, []],
+    ['rejects kda tags below 5 games', { kdaCv: 0.2, count: 4 }, []],
+    ['qualifies gank sensitivity at 1.5 early deaths', { gankTimes: 1.5 }, ['gank-sensitive']],
+    ['rejects gank sensitivity below 1.5 early deaths', { gankTimes: 1.4 }, []],
+    ['rejects a solo premade group', { premadeGroupSize: 1 }, []]
+  ])('%s', (_, signals, expectedTypes) => {
+    expect(selectTagsFromSignals(signals).map((tag) => tag.type)).toEqual(expectedTypes)
+  })
+
+  it('carries the streak count into the tag', () => {
+    expect(selectTagsFromSignals({ losingStreak: 5 })).toEqual([
+      { type: 'losing-streak', count: 5 }
+    ])
+  })
+
+  it('picks the most played champion and breaks ties by champion id', () => {
+    expect(
+      selectTagsFromSignals({
+        champions: [
+          { championId: 7, games: 6 },
+          { championId: 3, games: 6 },
+          { championId: 22, games: 4 }
+        ],
+        count: 20
+      })
+    ).toEqual([{ type: 'favorite-champion', championId: 3 }])
+  })
+
+  it('marks gank sensitivity as very easy above 2 early deaths', () => {
+    expect(selectTagsFromSignals({ gankTimes: 2.1 })).toEqual([
+      { type: 'gank-sensitive', level: 'very-easy' }
+    ])
+    expect(selectTagsFromSignals({ gankTimes: 1.6 })).toEqual([
+      { type: 'gank-sensitive', level: 'easy' }
+    ])
+  })
+
+  it('marks kda stability direction', () => {
+    expect(selectTagsFromSignals({ kdaCv: 0.2, count: 10 })).toEqual([
+      { type: 'kda-stability', stable: true }
+    ])
+    expect(selectTagsFromSignals({ kdaCv: 0.9, count: 10 })).toEqual([
+      { type: 'kda-stability', stable: false }
+    ])
+  })
+
+  it('carries the premade group size into the tag', () => {
+    expect(selectTagsFromSignals({ noAnalysis: true, premadeGroupSize: 3 })).toEqual([
+      { type: 'premade', size: 3 }
+    ])
+  })
+})
+
+describe('computeSituationRead feature tags', () => {
+  it('attaches the top player tags to highlights and omits them without signals', () => {
+    const result = computeSituationRead({
+      players: [
+        createPlayer(
+          'ally',
+          { tier: 'BRONZE', division: 'IV' },
+          createAnalysis({ count: 10, winRate: 0.5 }),
+          'TEAM-100'
+        ),
+        createPlayer(
+          'enemy',
+          { tier: 'CHALLENGER', division: 'NA' },
+          createAnalysis({ count: 10, winRate: 0.5, losingStreak: 5 }),
+          'TEAM-200'
+        )
+      ],
+      selfTeamIdentifier: 'TEAM-100',
+      premadeTeamMap: { enemy: 1, ally: 2 }
+    })
+
+    expect(result.topThreat!.featureTags).toEqual([{ type: 'losing-streak', count: 5 }])
+    expect(result.keyCarry!.featureTags).toEqual([])
+  })
+
+  it('derives the premade group size from the team map', () => {
+    const result = computeSituationRead({
+      players: [
+        createPlayer('ally', { tier: 'BRONZE', division: 'IV' }, null, 'TEAM-100'),
+        createPlayer('enemy-a', { tier: 'CHALLENGER', division: 'NA' }, null, 'TEAM-200'),
+        createPlayer('enemy-b', { tier: 'IRON', division: 'IV' }, null, 'TEAM-200')
+      ],
+      selfTeamIdentifier: 'TEAM-100',
+      premadeTeamMap: { 'enemy-a': 1, 'enemy-b': 1, ally: 2 }
+    })
+
+    expect(result.topThreat!.puuid).toBe('enemy-a')
+    expect(result.topThreat!.featureTags).toEqual([{ type: 'premade', size: 2 }])
   })
 })
