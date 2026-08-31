@@ -12,7 +12,7 @@
       @navigate-to-summoner-by-puuid="navigateToTabByPuuid"
       @dry-run-ongoing-game="handleDryRunOngoingGame"
     />
-    <SituationReadCard v-if="hasSituationRead" />
+    <SituationReadCard v-if="hasSituationRead" @navigate="navigateToTabByPuuid" />
     <OngoingGameProvider :value="ongoingGame">
       <OngoingGamePanel
         :content-width="contentWidth"
@@ -46,7 +46,8 @@ import { computed, ref, shallowRef } from 'vue'
 import { useMainWindowAppContext } from '@main-window/context'
 import { PlayerTabsRenderer } from '@main-window/shards/player-tabs'
 import SituationReadCard, {
-  SITUATION_READ_CARD_HEIGHT_PX
+  SITUATION_READ_CARD_HEIGHT_PX,
+  SITUATION_READ_RANKING_ROW_HEIGHT_PX
 } from './situation-read/SituationReadCard.vue'
 
 const { contentWidth, contentHeight } = useMainWindowAppContext()
@@ -86,6 +87,13 @@ const panelContentHeight = computed(() => {
     return contentHeight.value
   }
 
-  return Math.max(0, contentHeight.value - SITUATION_READ_CARD_HEIGHT_PX)
+  const hasHighlightCards = Boolean(
+    ongoingGameStore.situationRead?.topThreat || ongoingGameStore.situationRead?.keyCarry
+  )
+  const reservedHeight = hasHighlightCards
+    ? SITUATION_READ_CARD_HEIGHT_PX
+    : SITUATION_READ_RANKING_ROW_HEIGHT_PX
+
+  return Math.max(0, contentHeight.value - reservedHeight)
 })
 </script>

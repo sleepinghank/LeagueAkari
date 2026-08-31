@@ -268,3 +268,26 @@ ongoingGame:
   situationRead:
     title: 局势研判
     insufficientData: 数据不足
+    topThreatLabel: 敌方头号威胁
+    keyCarryLabel: 我方核心大腿
+    secondaryThreat: '次级威胁 {name} {score}'
+    secondaryCarry: '次级核心 {name} {score}'
+    basisRecentWithRank_one: '{rank} · 近 {count} 场胜率 {winRate}%'
+    basisRecentWithRank_other: '{rank} · 近 {count} 场胜率 {winRate}%'
+    basisRecentOnly_one: '近 {count} 场胜率 {winRate}%'
+    basisRecentOnly_other: '近 {count} 场胜率 {winRate}%'
+    openDetailHint: 点击查看完整分析
+    featureTags:
+      losingStreak_one: '{{count}} 连败'
+      losingStreak_other: '{{count}} 连败'
+      winningStreak_one: '{{count}} 连胜'
+      winningStreak_other: '{{count}} 连胜'
+      highWinRate: 极高胜率
+      favoriteChampion: '常用 {{champion}}'
+      kdaStable: 发挥稳定
+      kdaVolatile: 状态起伏
+      gankSensitiveEasy: 好抓
+      gankSensitiveVeryEasy: 非常好抓
+      suspiciousFlash: 闪现异位
+      premade_one: '预组队 {{count}} 人'
+      premade_other: '预组队 {{count}} 人'

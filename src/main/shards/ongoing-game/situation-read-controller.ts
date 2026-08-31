@@ -16,14 +16,16 @@ export class OngoingGameSituationReadController {
   constructor(private readonly _context: OngoingGameMainContext) {}
 
   watch() {
-    const { mobxUtils, state } = this._context
+    const { leagueClient, mobxUtils, state } = this._context
 
     mobxUtils.reaction(
       () => ({
         teamKeys: Object.entries(state.teams)
           .map(([teamIdentifier, puuids]) => `${teamIdentifier}:${puuids.join(',')}`)
           .toSorted(),
-        analysisKeys: Object.keys(state.analysis?.players ?? {}).toSorted(),
+        analysisKeys: Object.entries(state.analysis?.players ?? {})
+          .map(([puuid, analysis]) => `${puuid}:${analysis.count}:${analysis.detailsCount}`)
+          .toSorted(),
         rankedSoloKeys: Object.entries(state.rankedStats)
           .map(
             ([puuid, stats]) =>
@@ -32,6 +34,10 @@ export class OngoingGameSituationReadController {
               }`
           )
           .toSorted(),
+        premadeTeamKeys: Object.entries(state.mergedPremadeTeamMap)
+          .map(([puuid, group]) => `${puuid}:${group}`)
+          .toSorted(),
+        selfPuuid: leagueClient.data.summoner.me?.puuid ?? null,
         isSuperServerGame: this._isSuperServerGame()
       }),
       () => {
@@ -72,7 +78,23 @@ export class OngoingGameSituationReadController {
 
     return computeSituationRead({
       players,
-      isSuperServerGame: this._isSuperServerGame()
+      selfTeamIdentifier: this._getSelfTeamIdentifier(),
+      isSuperServerGame: this._isSuperServerGame(),
+      premadeTeamMap: this._context.state.mergedPremadeTeamMap
     })
+  }
+
+  /** 我方队伍：本地玩家所在队伍；未找到时返回 null（不产出头号卡） */
+  private _getSelfTeamIdentifier(): string | null {
+    const selfPuuid = this._context.leagueClient.data.summoner.me?.puuid
+    if (!selfPuuid) {
+      return null
+    }
+
+    const selfTeam = Object.entries(this._context.state.teams).find(([, puuids]) =>
+      puuids.includes(selfPuuid)
+    )
+
+    return selfTeam?.[0] ?? null
   }
 }
