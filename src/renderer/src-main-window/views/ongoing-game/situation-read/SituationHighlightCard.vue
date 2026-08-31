@@ -28,7 +28,7 @@
       <span
         v-for="tag of featureTagViews"
         :key="tag.key"
-        :class="['rounded-xs px-1 py-0.5 text-[11px] leading-[11px]', tag.class]"
+        :class="['rounded-xs px-1 py-0.5 text-[11px] leading-2.75', tag.class]"
       >
         {{ tag.text }}
       </span>
