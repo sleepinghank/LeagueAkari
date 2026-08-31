@@ -278,3 +278,143 @@ describe('computeSituationRead rankings', () => {
     ])
   })
 })
+
+describe('computeSituationRead top threat and key carry', () => {
+  function createTeamPlayer(
+    puuid: string,
+    teamIdentifier: string,
+    rankedSolo: { tier: string; division: string } | null,
+    analysis: AggregatedAnalysis | null = null
+  ): SituationReadPlayerInput {
+    return { puuid, teamIdentifier, rankedSolo, analysis }
+  }
+
+  /**
+   * 构造威胁分差距可控的敌方两人组（我方固定一人，不参与敌方评选）。
+   * 敌方第一名固定为王者（9.5）；第二名分数 = 段位基线 + 10 场胜率偏离修正（akari 中性），可精确控制到 0.1。
+   */
+  function createSidedPlayers(enemySecond: {
+    tier: string
+    division: string
+    winRate?: number
+  }): SituationReadPlayerInput[] {
+    return [
+      createTeamPlayer('ally', 'TEAM-100', { tier: 'BRONZE', division: 'IV' }),
+      createTeamPlayer('enemy-top', 'TEAM-200', { tier: 'CHALLENGER', division: 'NA' }),
+      createTeamPlayer(
+        'enemy-second',
+        'TEAM-200',
+        { tier: enemySecond.tier, division: enemySecond.division },
+        enemySecond.winRate === undefined
+          ? null
+          : createAnalysis({
+              count: 10,
+              winRate: enemySecond.winRate,
+              akariScoreTotal: 8.5
+            })
+      )
+    ]
+  }
+
+  it.each([
+    // 描述, 敌方第二名构造, 是否有次级
+    [
+      'shows the secondary threat when the gap is exactly 0.8',
+      { tier: 'MASTER', division: 'NA', winRate: 0.85 },
+      true
+    ],
+    [
+      'shows the secondary threat when the gap is below 0.8',
+      { tier: 'GRANDMASTER', division: 'NA', winRate: 0.75 },
+      true
+    ],
+    [
+      'hides the secondary threat when the gap is 0.9',
+      { tier: 'GRANDMASTER', division: 'NA', winRate: 0.55 },
+      false
+    ],
+    ['hides the secondary threat when the gap is large', { tier: 'BRONZE', division: 'IV' }, false]
+  ])('%s', (_, enemySecond, hasSecondary) => {
+    const result = computeSituationRead({
+      players: createSidedPlayers(enemySecond),
+      selfTeamIdentifier: 'TEAM-100'
+    })
+
+    expect(result.topThreat).not.toBeNull()
+    expect(result.topThreat!.puuid).toBe('enemy-top')
+    expect(result.topThreat!.secondary === null).toBe(!hasSecondary)
+    if (hasSecondary) {
+      expect(result.topThreat!.secondary!.puuid).toBe('enemy-second')
+    }
+
+    // 我方同理：唯一队员即核心大腿
+    expect(result.keyCarry).not.toBeNull()
+    expect(result.keyCarry!.puuid).toBe('ally')
+    expect(result.keyCarry!.secondary).toBeNull()
+  })
+
+  it('skips ineligible small-sample unranked players and promotes the next player', () => {
+    // smurf: 未定级 + 2 场样本 → 4.0 + 1.5*(2/5) = 4.6，排行第一但无评选资格
+    const smurf = createTeamPlayer(
+      'smurf',
+      'TEAM-200',
+      null,
+      createAnalysis({ count: 2, winRate: 1.0, akariScoreTotal: 17 })
+    )
+    const ranked = createTeamPlayer('ranked', 'TEAM-200', { tier: 'IRON', division: 'IV' })
+    const ally = createTeamPlayer('ally', 'TEAM-100', { tier: 'BRONZE', division: 'IV' })
+
+    const result = computeSituationRead({
+      players: [smurf, ranked, ally],
+      selfTeamIdentifier: 'TEAM-100'
+    })
+
+    // 排行仍以分数为准，无资格玩家保持第一
+    expect(result.threatRankings.map((entry) => entry.puuid)).toEqual(['smurf', 'ally', 'ranked'])
+    // 评选跳过无资格玩家
+    expect(result.topThreat!.puuid).toBe('ranked')
+  })
+
+  it.each([
+    [
+      'ranked players with fewer than 3 recent games stay eligible',
+      { tier: 'GOLD', division: 'I' },
+      2
+    ],
+    ['unranked players with at least 3 recent games become eligible', null, 3]
+  ])('%s', (_, rankedSolo, count) => {
+    const candidate = createTeamPlayer(
+      'candidate',
+      'TEAM-200',
+      rankedSolo,
+      createAnalysis({ count, winRate: 0.5, akariScoreTotal: 8.5 })
+    )
+    const ally = createTeamPlayer('ally', 'TEAM-100', { tier: 'BRONZE', division: 'IV' })
+
+    const result = computeSituationRead({
+      players: [candidate, ally],
+      selfTeamIdentifier: 'TEAM-100'
+    })
+
+    expect(result.topThreat!.puuid).toBe('candidate')
+  })
+
+  it.each([
+    'produces no highlights when nobody is eligible',
+    'produces no highlights without a self team'
+  ])('%s', (description) => {
+    const players = [
+      createTeamPlayer('ally-unknown', 'TEAM-100', null, null),
+      createTeamPlayer('enemy-unknown', 'TEAM-200', null, null)
+    ]
+
+    const result = computeSituationRead({
+      players,
+      selfTeamIdentifier: description.includes('self team') ? undefined : 'TEAM-100'
+    })
+
+    expect(result.topThreat).toBeNull()
+    expect(result.keyCarry).toBeNull()
+    expect(result.threatRankings).toHaveLength(2)
+  })
+})

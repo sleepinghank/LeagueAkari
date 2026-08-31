@@ -67,6 +67,16 @@ export const THREAT_SCORE_MAX = 10
 const UNRANKED_TIERS = new Set(['NA', 'NONE', ''])
 
 /**
+ * 次级威胁（次级核心）的分差阈值：第二名与头号威胁分差不超过该值时才展示，覆盖双核阵容。
+ */
+export const SITUATION_SECONDARY_SCORE_GAP = 0.8
+
+/**
+ * 头号评选所需的最小近期样本：未定级玩家近期样本不足该数量时不参与评选（防新号小样本误判）。
+ */
+export const SITUATION_MIN_ELIGIBLE_SAMPLE_COUNT = 3
+
+/**
  * 峡谷之巅超级服（rsoPlatformId）的对局中，单双排段位实际水平按王者档计算。
  */
 export const SUPER_SERVER_RSO_PLATFORM_ID = 'BGP2'
@@ -92,9 +102,26 @@ export interface SituationPlayerThreat {
   score: number | null
 }
 
+export interface SituationReadSecondary {
+  puuid: string
+  score: number
+}
+
+export interface SituationReadHighlight {
+  puuid: string
+  teamIdentifier: string
+  score: number
+  /** 同队威胁分第二名；仅当与头号分差不超过阈值时存在 */
+  secondary: SituationReadSecondary | null
+}
+
 export interface SituationRead {
   /** 全部玩家，按威胁分降序排列；数据不足的玩家排在末尾（保持输入顺序） */
   threatRankings: SituationPlayerThreat[]
+  /** 敌方头号威胁；无敌方队伍或全员无评选资格时为 null */
+  topThreat: SituationReadHighlight | null
+  /** 我方核心大腿；无我方队伍或全员无评选资格时为 null */
+  keyCarry: SituationReadHighlight | null
 }
 
 /**
@@ -113,11 +140,13 @@ export function extractSoloRankedEntry(
 }
 
 /**
- * 计算局势研判结果（当前为敌我十人威胁分排行）。
+ * 计算局势研判结果：敌我十人威胁分排行、敌方头号威胁与我方核心大腿（含次级）。
  * 纯函数，不依赖 IPC / 网络。
  */
 export function computeSituationRead(options: {
   players: SituationReadPlayerInput[]
+  /** 我方（本地玩家所在）队伍标识；缺失时不产出头号卡 */
+  selfTeamIdentifier?: string | null
   /** 峡谷之巅超级服对局：单双排段位按王者档计算基线 */
   isSuperServerGame?: boolean
 }): SituationRead {
@@ -127,14 +156,89 @@ export function computeSituationRead(options: {
     score: computeThreatScore(player, Boolean(options.isSuperServerGame))
   }))
 
+  const sortedRankings = threatRankings.toSorted((a, b) => {
+    if (a.score === null && b.score === null) return 0
+    if (a.score === null) return 1
+    if (b.score === null) return -1
+    return b.score - a.score
+  })
+
+  const selfTeamIdentifier = options.selfTeamIdentifier ?? null
+  const enemyTeamIdentifiers = new Set(
+    options.players
+      .map((player) => player.teamIdentifier)
+      .filter((teamIdentifier) => teamIdentifier !== selfTeamIdentifier)
+  )
+
   return {
-    threatRankings: threatRankings.toSorted((a, b) => {
-      if (a.score === null && b.score === null) return 0
-      if (a.score === null) return 1
-      if (b.score === null) return -1
-      return b.score - a.score
-    })
+    threatRankings: sortedRankings,
+    topThreat: computeTeamHighlight(sortedRankings, options.players, enemyTeamIdentifiers),
+    keyCarry: selfTeamIdentifier
+      ? computeTeamHighlight(sortedRankings, options.players, new Set([selfTeamIdentifier]))
+      : null
   }
+}
+
+/**
+ * 从威胁分排行中判定一支（或多支）队伍的头号玩家与次级玩家。
+ * 与排行共用同一排序，仅样本资格规则会导致"排行第一却不是头号"。
+ */
+function computeTeamHighlight(
+  sortedRankings: SituationPlayerThreat[],
+  players: SituationReadPlayerInput[],
+  teamIdentifiers: Set<string>
+): SituationReadHighlight | null {
+  const playerInputs = new Map(players.map((player) => [player.puuid, player]))
+
+  const eligible: (SituationPlayerThreat & { score: number })[] = []
+  for (const entry of sortedRankings) {
+    const { score } = entry
+    if (score === null) {
+      continue
+    }
+    if (!teamIdentifiers.has(entry.teamIdentifier)) {
+      continue
+    }
+    if (!isEligibleForHighlight(playerInputs.get(entry.puuid))) {
+      continue
+    }
+
+    eligible.push({ ...entry, score })
+  }
+
+  if (!eligible.length) {
+    return null
+  }
+
+  const [top, second] = eligible
+
+  return {
+    puuid: top.puuid,
+    teamIdentifier: top.teamIdentifier,
+    score: top.score,
+    secondary:
+      second && isWithinSecondaryGap(top.score, second.score)
+        ? { puuid: second.puuid, score: second.score }
+        : null
+  }
+}
+
+/** 评选资格：数据不足（无分）的玩家已在调用方排除；未定级玩家还需至少 3 场近期样本 */
+function isEligibleForHighlight(player: SituationReadPlayerInput | undefined): boolean {
+  if (!player) {
+    return false
+  }
+
+  if (player.rankedSolo) {
+    return true
+  }
+
+  return (player.analysis?.count ?? 0) >= SITUATION_MIN_ELIGIBLE_SAMPLE_COUNT
+}
+
+/** 分差阈值按一位小数整数比较，规避浮点误差（如 9.5 - 8.7） */
+function isWithinSecondaryGap(topScore: number, secondScore: number): boolean {
+  return Math.round((topScore - secondScore) * 10) <= Math.round(SITUATION_SECONDARY_SCORE_GAP * 10)
 }
 
 function computeThreatScore(player: SituationReadPlayerInput, isSuperServerGame: boolean) {
