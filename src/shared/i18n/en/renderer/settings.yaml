@@ -279,6 +279,19 @@ settings:
           label: Akari Score
         showAverageKillDamageEfficiencyTag:
           label: Average Kill Damage Efficiency
+    titleAiSituationBrief: AI Situation Brief
+    aiSituationBrief:
+      apiKey:
+        label: DeepSeek API Key
+        description: When configured, the AI situation brief is enabled. It automatically requests the external LLM once the situation-read card appears and generates a natural-language summary, consuming tokens from your own quota. Leave empty to keep the feature off
+        placeholder: Leave empty to disable the AI situation brief
+      baseUrl:
+        label: Base URL
+        description: OpenAI-compatible endpoint. Defaults to the official DeepSeek endpoint; can point to a relay
+      model:
+        label: Model
+        description: Defaults to deepseek-chat; other model names are accepted
+      privacyNote: "Privacy note: when enabled, every generation sends the following data to your configured DeepSeek endpoint — the ten players' summoner names, ally/enemy sides, positions, champions picked this game, ranks relevant to this game, threat scores, recent win rates and game counts, Akari scores, feature tags (up to 3), and premade relations, plus your own position, your champion, and the game mode"
   multiWindow:
     title: Multi-Window
     auxWindow:

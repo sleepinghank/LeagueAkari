@@ -12,6 +12,7 @@ import {
   type LanerMatchupReport,
   type SituationReadPlayerInput,
   computeSituationRead,
+  extractFlexRankedEntry,
   extractSoloRankedEntry,
   getSituationReadModeTier,
   selectFeatureTags
@@ -364,6 +365,31 @@ function getScore(players: SituationReadPlayerInput[], puuid: string) {
   return entry!.score
 }
 
+function createFlexPlayer(
+  puuid: string,
+  rankedFlex: { tier: string; division: string } | null,
+  rankedSolo: { tier: string; division: string } | null = null,
+  analysis: AggregatedAnalysis | null = null,
+  teamIdentifier = 'TEAM-100'
+): SituationReadPlayerInput {
+  return { puuid, teamIdentifier, rankedSolo, rankedFlex, analysis }
+}
+
+function getFlexScore(
+  players: SituationReadPlayerInput[],
+  puuid: string,
+  options: { isSuperServerGame?: boolean } = {}
+) {
+  const result = computeSituationRead({
+    players,
+    isFlexQueueGame: true,
+    isSuperServerGame: options.isSuperServerGame ?? false
+  })
+  const entry = result.threatRankings.find((entry) => entry.puuid === puuid)
+  expect(entry).toBeDefined()
+  return entry!.score
+}
+
 describe('extractSoloRankedEntry', () => {
   it('extracts the solo queue entry only', () => {
     const rankedStats = {
@@ -387,6 +413,33 @@ describe('extractSoloRankedEntry', () => {
       } as unknown as RankedStats
 
       expect(extractSoloRankedEntry(rankedStats)).toBeNull()
+    }
+  })
+})
+
+describe('extractFlexRankedEntry', () => {
+  it('extracts the flex queue entry only', () => {
+    const rankedStats = {
+      queueMap: {
+        RANKED_FLEX_SR: { tier: 'DIAMOND', division: 'I' },
+        RANKED_SOLO_5x5: { tier: 'GOLD', division: 'II' }
+      }
+    } as RankedStats
+
+    expect(extractFlexRankedEntry(rankedStats)).toEqual({ tier: 'DIAMOND', division: 'I' })
+    expect(extractFlexRankedEntry(null)).toBeNull()
+  })
+
+  it('treats unranked flex tiers as no rank', () => {
+    const cases: (string | null | undefined)[] = ['NA', 'NONE', '', null, undefined]
+    for (const tier of cases) {
+      const rankedStats = {
+        queueMap: {
+          RANKED_FLEX_SR: { tier, division: 'IV' }
+        }
+      } as unknown as RankedStats
+
+      expect(extractFlexRankedEntry(rankedStats)).toBeNull()
     }
   })
 })
@@ -473,6 +526,261 @@ describe('computeSituationRead insufficient data sentinel', () => {
 
   it('keeps the rank-based score for players without recent games', () => {
     expect(getScore([createPlayer('p1', { tier: 'DIAMOND', division: 'II' })], 'p1')).not.toBeNull()
+  })
+})
+
+describe('computeSituationRead flex queue threat score', () => {
+  // 灵活局压缩基线：5.0 + (单双局基线 − 5.0) × 0.30，期望值为取一位小数后的威胁分
+  // （如钻石 6.5 → 5.45 → 5.5、王者 9.5 → 6.35 → 6.4）
+  it.each([
+    ['IRON', 'IV', 4.1],
+    ['IRON', 'I', 4.3],
+    ['BRONZE', 'IV', 4.3],
+    ['SILVER', 'I', 4.8],
+    ['GOLD', 'IV', 4.8],
+    ['GOLD', 'I', 5.0],
+    ['PLATINUM', 'IV', 5.0],
+    ['PLATINUM', 'II', 5.1],
+    ['EMERALD', 'I', 5.5],
+    ['DIAMOND', 'IV', 5.5],
+    ['DIAMOND', 'I', 5.8],
+    ['MASTER', 'NA', 5.9],
+    ['GRANDMASTER', 'NA', 6.1],
+    ['CHALLENGER', 'NA', 6.4]
+  ])('compresses %s %s baseline to %s in flex queue games', (tier, division, expected) => {
+    expect(getFlexScore([createFlexPlayer('p1', { tier, division })], 'p1')).toBeCloseTo(
+      expected,
+      5
+    )
+  })
+
+  it('compresses the unranked baseline in flex queue games', () => {
+    expect(
+      getFlexScore(
+        [
+          createFlexPlayer(
+            'p1',
+            null,
+            null,
+            createAnalysis({ count: 10, winRate: 0.5, akariScoreTotal: 8.5 })
+          )
+        ],
+        'p1'
+      )
+    ).toBeCloseTo(4.7, 5)
+  })
+
+  it('compresses the super server challenger mapping in flex queue games', () => {
+    expect(
+      getFlexScore([createFlexPlayer('p1', { tier: 'GOLD', division: 'I' })], 'p1', {
+        isSuperServerGame: true
+      })
+    ).toBeCloseTo(6.4, 5)
+  })
+})
+
+describe('computeSituationRead flex queue performance adjustment', () => {
+  // 灵活局黄金 IV 压缩基线 4.82；胜率与 Akari 权重各 4.0、上限 ±3.5；期望值为取一位小数后的威胁分
+  it.each([
+    // 描述, 胜率, Akari 总分, 场次, 期望分
+    ['clamps the upward adjustment to +3.5', 1.0, 17, 10, 8.3],
+    ['clamps the downward adjustment to -3.5', 0.0, 0, 10, 1.3],
+    ['applies both win rate and akari deviation', 0.7, 12.75, 10, 6.6],
+    ['does not clamp when only one signal deviates', 1.0, 8.5, 10, 6.8],
+    ['keeps neutral performance at the compressed baseline', 0.5, 8.5, 10, 4.8],
+    ['shrinks the adjustment for small samples', 1.0, 17, 2, 6.2],
+    ['shrinks the adjustment to zero without samples', 1.0, 17, 0, 4.8]
+  ])('%s', (_, winRate, akariScoreTotal, count, expected) => {
+    expect(
+      getFlexScore(
+        [
+          createFlexPlayer(
+            'p1',
+            { tier: 'GOLD', division: 'IV' },
+            null,
+            createAnalysis({ count, winRate, akariScoreTotal })
+          )
+        ],
+        'p1'
+      )
+    ).toBeCloseTo(expected, 5)
+  })
+
+  it('lets recent form outrank the inflated flex rank in flex queue games', () => {
+    // 躺赢高段位：灵活王者压缩基线 6.35，近 20 场 30% 胜率、Akari 0.3 → 4.7
+    // 近期超神：灵活黑铁压缩基线 4.1，近 20 场 80% 胜率、Akari 0.8 → 6.5
+    const inflated = createFlexPlayer(
+      'inflated',
+      { tier: 'CHALLENGER', division: 'NA' },
+      null,
+      createAnalysis({ count: 20, winRate: 0.3, akariScoreTotal: 5.1 })
+    )
+    const performer = createFlexPlayer(
+      'performer',
+      { tier: 'IRON', division: 'IV' },
+      null,
+      createAnalysis({ count: 20, winRate: 0.8, akariScoreTotal: 13.6 })
+    )
+
+    const result = computeSituationRead({ players: [inflated, performer], isFlexQueueGame: true })
+    expect(result.threatRankings[0].puuid).toBe('performer')
+  })
+
+  it('keeps the high solo rank ahead of the same players in solo queue games', () => {
+    // 同样的近期表现放在单双局：段位主导，王者 8.7 仍高于黑铁 3.2
+    const inflated = createFlexPlayer(
+      'inflated',
+      null,
+      { tier: 'CHALLENGER', division: 'NA' },
+      createAnalysis({ count: 20, winRate: 0.3, akariScoreTotal: 5.1 })
+    )
+    const performer = createFlexPlayer(
+      'performer',
+      null,
+      { tier: 'IRON', division: 'IV' },
+      createAnalysis({ count: 20, winRate: 0.8, akariScoreTotal: 13.6 })
+    )
+
+    const result = computeSituationRead({ players: [inflated, performer] })
+    expect(result.threatRankings[0].puuid).toBe('inflated')
+  })
+})
+
+describe('computeSituationRead flex queue rank fallback chain', () => {
+  it('uses the flex rank when available', () => {
+    expect(
+      getFlexScore(
+        [
+          createFlexPlayer(
+            'p1',
+            { tier: 'GOLD', division: 'I' },
+            { tier: 'CHALLENGER', division: 'NA' }
+          )
+        ],
+        'p1'
+      )
+    ).toBeCloseTo(5.0, 5)
+  })
+
+  it('falls back to the solo rank without a flex rank', () => {
+    expect(
+      getFlexScore([createFlexPlayer('p1', null, { tier: 'DIAMOND', division: 'I' })], 'p1')
+    ).toBeCloseTo(5.8, 5)
+  })
+
+  it('reports insufficient data without any rank and without recent games', () => {
+    expect(getFlexScore([createFlexPlayer('p1', null, null)], 'p1')).toBeNull()
+  })
+
+  it('ignores the flex rank in non-flex games', () => {
+    expect(
+      getScore(
+        [
+          createFlexPlayer(
+            'p1',
+            { tier: 'CHALLENGER', division: 'NA' },
+            { tier: 'GOLD', division: 'I' }
+          )
+        ],
+        'p1'
+      )
+    ).toBeCloseTo(5.0, 5)
+  })
+
+  it('keeps unranked players with small samples ineligible for flex highlights', () => {
+    // 灵活局：未定级 + 2 场样本 → 压缩基线 4.7 + 3.5*(2/5)，排行第一但无评选资格
+    const smurf = createFlexPlayer(
+      'smurf',
+      null,
+      null,
+      createAnalysis({ count: 2, winRate: 1.0, akariScoreTotal: 17 }),
+      'TEAM-200'
+    )
+    const ranked = createFlexPlayer(
+      'ranked',
+      { tier: 'IRON', division: 'IV' },
+      null,
+      null,
+      'TEAM-200'
+    )
+    const ally = createFlexPlayer(
+      'ally',
+      null,
+      { tier: 'BRONZE', division: 'IV' },
+      null,
+      'TEAM-100'
+    )
+
+    const result = computeSituationRead({
+      players: [smurf, ranked, ally],
+      selfTeamIdentifier: 'TEAM-100',
+      isFlexQueueGame: true
+    })
+
+    expect(result.topThreat!.puuid).toBe('ranked')
+  })
+})
+
+describe('computeSituationRead flex queue secondary threat gap', () => {
+  /**
+   * 敌方第一名固定为灵活王者（压缩基线 6.35）；
+   * 第二名分数由灵活段位压缩基线 + 10 场胜率偏离修正（akari 中性）精确控制到 0.1。
+   */
+  function createSidedFlexPlayers(enemySecond: {
+    tier: string
+    division: string
+    winRate?: number
+  }): SituationReadPlayerInput[] {
+    return [
+      createFlexPlayer('ally', null, { tier: 'BRONZE', division: 'IV' }, null, 'TEAM-100'),
+      createFlexPlayer('enemy-top', { tier: 'CHALLENGER', division: 'NA' }, null, null, 'TEAM-200'),
+      createFlexPlayer(
+        'enemy-second',
+        { tier: enemySecond.tier, division: enemySecond.division },
+        null,
+        enemySecond.winRate === undefined
+          ? null
+          : createAnalysis({
+              count: 10,
+              winRate: enemySecond.winRate,
+              akariScoreTotal: 8.5
+            }),
+        'TEAM-200'
+      )
+    ]
+  }
+
+  it.each([
+    // 描述, 敌方第二名构造, 是否有次级
+    // 敌方第一名固定 6.4；MASTER 中性 5.9 恰好差 0.5，MASTER 0.475 胜率 5.8 差 0.6
+    [
+      'shows the secondary threat when the gap is exactly 0.5',
+      { tier: 'MASTER', division: 'NA', winRate: 0.5 },
+      true
+    ],
+    [
+      'shows the secondary threat when the gap is below 0.5',
+      { tier: 'DIAMOND', division: 'I', winRate: 0.55 },
+      true
+    ],
+    [
+      'hides the secondary threat when the gap is 0.6',
+      { tier: 'MASTER', division: 'NA', winRate: 0.475 },
+      false
+    ]
+  ])('%s', (_, enemySecond, hasSecondary) => {
+    const result = computeSituationRead({
+      players: createSidedFlexPlayers(enemySecond),
+      selfTeamIdentifier: 'TEAM-100',
+      isFlexQueueGame: true
+    })
+
+    expect(result.topThreat).not.toBeNull()
+    expect(result.topThreat!.puuid).toBe('enemy-top')
+    expect(result.topThreat!.secondary === null).toBe(!hasSecondary)
+    if (hasSecondary) {
+      expect(result.topThreat!.secondary!.puuid).toBe('enemy-second')
+    }
   })
 })
 

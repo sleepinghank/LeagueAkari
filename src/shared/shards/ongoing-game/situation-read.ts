@@ -9,8 +9,8 @@ import type { RankedStats } from '@shared/types/league-client/ranked'
  * 局势研判的纯函数计算层。
  *
  * 威胁分（0–10，一位小数）= 段位基线 + 近期表现修正：
- * - 基线来自单双排段位常量映射表（集中可调）；
- * - 修正由近期胜率偏离与 Akari 评分合成，上限 ±1.5；
+ * - 基线来自段位常量映射表（集中可调）；本局为灵活排位时基线向中性压缩并优先取灵活段位；
+ * - 修正由近期胜率偏离与 Akari 评分合成，上限按队列取参数组（单双/匹配 ±1.5、灵活 ±3.5）；
  * - 样本不足 5 场时修正按样本量向基线收缩；
  * - 无段位且无近期战绩时输出"数据不足"哨兵（score 为 null）。
  *
@@ -22,7 +22,7 @@ import type { RankedStats } from '@shared/types/league-client/ranked'
  * 我未选定英雄时克制提示整条跳过。
  */
 
-/** 未定级（无单双排段位）玩家的基线 */
+/** 未定级（无本局相关段位）玩家的基线 */
 export const THREAT_SCORE_UNRANKED_BASELINE = 4.0
 
 /** 带小段位（IV→I）的段位，从低到高 */
@@ -55,17 +55,43 @@ export const THREAT_SCORE_APEX_BASELINES = {
   CHALLENGER: 9.5
 } as const
 
-/** 近期表现修正的绝对值上限 */
-export const THREAT_SCORE_MAX_ADJUSTMENT = 1.5
+/** 基线压缩的中性中心点（灵活局向该值收敛段位差距） */
+export const THREAT_SCORE_BASELINE_COMPRESSION_CENTER = 5.0
+
+/**
+ * 威胁分评分参数组（按本局队列二选一，集中可调）：
+ * - 基线压缩：基线′ = 压缩中心 + (基线 − 压缩中心) × 系数；
+ * - 近期表现修正：胜率与 Akari 评分各自的权重，以及合成后的绝对值上限。
+ */
+export interface ThreatScoreParams {
+  /** 基线压缩系数；1 表示不压缩 */
+  baselineCompression: number
+  /** 胜率每偏离 50% 一个单位贡献的修正（胜率 100% → +0.5 × 权重） */
+  winRateScale: number
+  /** Akari 评分比例每偏离中性锚点一个单位贡献的修正（满分 → +0.5 × 权重） */
+  akariScale: number
+  /** 近期表现修正的绝对值上限 */
+  maxAdjustment: number
+}
+
+/** 单双排与普通匹配局的评分参数组（段位基线不压缩、修正上限 ±1.5） */
+export const THREAT_SCORE_SOLO_PARAMS: ThreatScoreParams = {
+  baselineCompression: 1,
+  winRateScale: 2.0,
+  akariScale: 2.0,
+  maxAdjustment: 1.5
+}
+
+/** 灵活排位局的评分参数组：段位基线向中性压缩、近期表现主导排序（修正上限 ±3.5） */
+export const THREAT_SCORE_FLEX_PARAMS: ThreatScoreParams = {
+  baselineCompression: 0.3,
+  winRateScale: 4.0,
+  akariScale: 4.0,
+  maxAdjustment: 3.5
+}
 
 /** 修正不收缩所需的最小近期场次 */
 export const THREAT_SCORE_FULL_SAMPLE_COUNT = 5
-
-/** 胜率每偏离 50% 一个单位贡献的修正（胜率 100% → +1.0） */
-export const THREAT_SCORE_WIN_RATE_ADJUSTMENT_SCALE = 2.0
-
-/** Akari 评分比例每偏离中性锚点一个单位贡献的修正（满分 → +1.0） */
-export const THREAT_SCORE_AKARI_ADJUSTMENT_SCALE = 2.0
 
 /** Akari 评分比例的中性锚点（比例 = akariScore.total / akariScore.maxScore） */
 export const THREAT_SCORE_AKARI_NEUTRAL_RATIO = 0.5
@@ -79,8 +105,12 @@ const UNRANKED_TIERS = new Set(['NA', 'NONE', ''])
 
 /**
  * 次级威胁（次级核心）的分差阈值：第二名与头号威胁分差不超过该值时才展示，覆盖双核阵容。
+ * 单双排与匹配局沿用 0.8；灵活局分数分布更密，阈值降为 0.5。
  */
 export const SITUATION_SECONDARY_SCORE_GAP = 0.8
+
+/** 灵活排位局的次级威胁分差阈值 */
+export const SITUATION_SECONDARY_SCORE_GAP_FLEX = 0.5
 
 /**
  * 头号评选所需的最小近期样本：未定级玩家近期样本不足该数量时不参与评选（防新号小样本误判）。
@@ -91,6 +121,11 @@ export const SITUATION_MIN_ELIGIBLE_SAMPLE_COUNT = 3
  * 峡谷之巅超级服（rsoPlatformId）的对局中，单双排段位实际水平按王者档计算。
  */
 export const SUPER_SERVER_RSO_PLATFORM_ID = 'BGP2'
+
+/** 本局是否为灵活排位（queueId 440）：威胁分切换灵活局参数组与段位回退链 */
+export function isFlexQueue(queueId: number | null | undefined): boolean {
+  return queueId === QueueEnum.RANK_FLEX
+}
 
 /**
  * 研判展示档位（按对局模式降级）：
@@ -261,8 +296,10 @@ export type ChampionCounterQuery = (
 export interface SituationReadPlayerInput {
   puuid: string
   teamIdentifier: string
-  /** 单双排段位；未定级或无数据为 null。灵活组排段位不参与计算，仅展示 */
+  /** 单双排段位；未定级或无数据为 null。灵活局作为基线段位的回退来源 */
   rankedSolo: SituationReadRankedSolo | null
+  /** 灵活排位段位；未定级或无数据为 null。灵活局优先作为基线段位 */
+  rankedFlex?: SituationReadRankedSolo | null
   /** 近期对局聚合分析；无战绩为 null */
   analysis: AggregatedAnalysis | null
 }
@@ -397,7 +434,23 @@ export interface SituationRead {
 export function extractSoloRankedEntry(
   rankedStats: RankedStats | null | undefined
 ): SituationReadRankedSolo | null {
-  const entry = rankedStats?.queueMap?.['RANKED_SOLO_5x5']
+  return extractRankedEntry(rankedStats, 'RANKED_SOLO_5x5')
+}
+
+/**
+ * 从段位数据中提取灵活排位段位条目；未定级或无数据返回 null。
+ */
+export function extractFlexRankedEntry(
+  rankedStats: RankedStats | null | undefined
+): SituationReadRankedSolo | null {
+  return extractRankedEntry(rankedStats, 'RANKED_FLEX_SR')
+}
+
+function extractRankedEntry(
+  rankedStats: RankedStats | null | undefined,
+  queueKey: 'RANKED_SOLO_5x5' | 'RANKED_FLEX_SR'
+): SituationReadRankedSolo | null {
+  const entry = rankedStats?.queueMap?.[queueKey]
 
   if (!entry || !entry.tier || UNRANKED_TIERS.has(entry.tier)) {
     return null
@@ -407,8 +460,25 @@ export function extractSoloRankedEntry(
 }
 
 /**
+ * 玩家参与威胁分计算与判定依据展示的段位来源：
+ * 灵活局优先灵活段位（缺失回退单双段位）；其余队列一律单双段位。
+ */
+export function getEffectiveRankedEntry(
+  rankedFlex: SituationReadRankedSolo | null,
+  rankedSolo: SituationReadRankedSolo | null,
+  isFlexQueueGame: boolean
+): SituationReadRankedSolo | null {
+  if (isFlexQueueGame && rankedFlex) {
+    return rankedFlex
+  }
+
+  return rankedSolo
+}
+
+/**
  * 计算局势研判结果：敌我十人威胁分排行、敌方头号威胁与我方核心大腿（含次级与特征标签）+ 对位专报。
  * 纯函数，不依赖 IPC / 网络。basic 档位（大乱斗）下对位专报整体不产出。
+ * 本局为灵活排位时切换灵活局参数组（压缩基线、修正权重与上限、次级阈值）并优先取灵活段位。
  */
 export function computeSituationRead(options: {
   players: SituationReadPlayerInput[]
@@ -422,11 +492,30 @@ export function computeSituationRead(options: {
   matchup?: MatchupReadContext
   /** 展示档位；basic（大乱斗）时对位专报与打野小节隐藏。缺省 full */
   modeTier?: SituationReadModeTier
+  /** 本局为灵活排位（queueId 440）：切换灵活局参数组与段位回退链；缺省 false */
+  isFlexQueueGame?: boolean
 }): SituationRead {
+  const isFlexQueueGame = Boolean(options.isFlexQueueGame)
+  const params = isFlexQueueGame ? THREAT_SCORE_FLEX_PARAMS : THREAT_SCORE_SOLO_PARAMS
+  const secondaryGap = isFlexQueueGame
+    ? SITUATION_SECONDARY_SCORE_GAP_FLEX
+    : SITUATION_SECONDARY_SCORE_GAP
+  const effectiveRanks = new Map(
+    options.players.map((player) => [
+      player.puuid,
+      getEffectiveRankedEntry(player.rankedFlex ?? null, player.rankedSolo, isFlexQueueGame)
+    ])
+  )
+
   const threatRankings = options.players.map((player) => ({
     puuid: player.puuid,
     teamIdentifier: player.teamIdentifier,
-    score: computeThreatScore(player, Boolean(options.isSuperServerGame))
+    score: computeThreatScore(
+      effectiveRanks.get(player.puuid) ?? null,
+      player.analysis,
+      Boolean(options.isSuperServerGame),
+      params
+    )
   }))
 
   const sortedRankings = threatRankings.toSorted((a, b) => {
@@ -450,14 +539,18 @@ export function computeSituationRead(options: {
       sortedRankings,
       options.players,
       enemyTeamIdentifiers,
-      premadeGroupSizes
+      premadeGroupSizes,
+      effectiveRanks,
+      secondaryGap
     ),
     keyCarry: selfTeamIdentifier
       ? computeTeamHighlight(
           sortedRankings,
           options.players,
           new Set([selfTeamIdentifier]),
-          premadeGroupSizes
+          premadeGroupSizes,
+          effectiveRanks,
+          secondaryGap
         )
       : null,
     matchupReport:
@@ -601,7 +694,9 @@ function getPremadeTag(premadeGroupSize: number | null): SituationFeatureTag | n
 }
 
 /** 由预组队映射（puuid → 组标识）得出每个玩家所在组的人数 */
-function getPremadeGroupSizes(premadeTeamMap: Record<string, number> | null): Map<string, number> {
+export function getPremadeGroupSizes(
+  premadeTeamMap: Record<string, number> | null
+): Map<string, number> {
   const groupSizes = new Map<string, number>()
 
   if (!premadeTeamMap) {
@@ -628,7 +723,9 @@ function computeTeamHighlight(
   sortedRankings: SituationPlayerThreat[],
   players: SituationReadPlayerInput[],
   teamIdentifiers: Set<string>,
-  premadeGroupSizes: Map<string, number>
+  premadeGroupSizes: Map<string, number>,
+  effectiveRanks: Map<string, SituationReadRankedSolo | null>,
+  secondaryGap: number
 ): SituationReadHighlight | null {
   const playerInputs = new Map(players.map((player) => [player.puuid, player]))
 
@@ -641,7 +738,7 @@ function computeTeamHighlight(
     if (!teamIdentifiers.has(entry.teamIdentifier)) {
       continue
     }
-    if (!isEligibleForHighlight(playerInputs.get(entry.puuid))) {
+    if (!isEligibleForHighlight(playerInputs.get(entry.puuid), effectiveRanks.get(entry.puuid))) {
       continue
     }
 
@@ -660,7 +757,7 @@ function computeTeamHighlight(
     teamIdentifier: top.teamIdentifier,
     score: top.score,
     secondary:
-      second && isWithinSecondaryGap(top.score, second.score)
+      second && isWithinSecondaryGap(top.score, second.score, secondaryGap)
         ? { puuid: second.puuid, score: second.score }
         : null,
     featureTags: selectFeatureTags({
@@ -670,13 +767,19 @@ function computeTeamHighlight(
   }
 }
 
-/** 评选资格：数据不足（无分）的玩家已在调用方排除；未定级玩家还需至少 3 场近期样本 */
-function isEligibleForHighlight(player: SituationReadPlayerInput | undefined): boolean {
+/**
+ * 评选资格：数据不足（无分）的玩家已在调用方排除；
+ * 无本局相关段位（未定级/无段位）的玩家还需至少 3 场近期样本。
+ */
+function isEligibleForHighlight(
+  player: SituationReadPlayerInput | undefined,
+  effectiveRank: SituationReadRankedSolo | null | undefined
+): boolean {
   if (!player) {
     return false
   }
 
-  if (player.rankedSolo) {
+  if (effectiveRank) {
     return true
   }
 
@@ -684,8 +787,8 @@ function isEligibleForHighlight(player: SituationReadPlayerInput | undefined): b
 }
 
 /** 分差阈值按一位小数整数比较，规避浮点误差（如 9.5 - 8.7） */
-function isWithinSecondaryGap(topScore: number, secondScore: number): boolean {
-  return Math.round((topScore - secondScore) * 10) <= Math.round(SITUATION_SECONDARY_SCORE_GAP * 10)
+function isWithinSecondaryGap(topScore: number, secondScore: number, gap: number): boolean {
+  return Math.round((topScore - secondScore) * 10) <= Math.round(gap * 10)
 }
 
 /**
@@ -970,19 +1073,38 @@ function getChampionArchetypePrecautions(
   )
 }
 
-function computeThreatScore(player: SituationReadPlayerInput, isSuperServerGame: boolean) {
-  const baseline = getThreatScoreBaseline(player.rankedSolo, isSuperServerGame)
-  const hasRecentGames = player.analysis !== null
+function computeThreatScore(
+  effectiveRank: SituationReadRankedSolo | null,
+  analysis: AggregatedAnalysis | null,
+  isSuperServerGame: boolean,
+  params: ThreatScoreParams
+) {
+  const baseline = getThreatScoreBaseline(effectiveRank, isSuperServerGame)
+  const hasRecentGames = analysis !== null
 
   if (baseline === null && !hasRecentGames) {
     return null
   }
 
-  const effectiveBaseline = baseline ?? THREAT_SCORE_UNRANKED_BASELINE
-  const adjustment = getPerformanceAdjustment(player.analysis)
+  const effectiveBaseline = compressBaseline(baseline ?? THREAT_SCORE_UNRANKED_BASELINE, params)
+  const adjustment = getPerformanceAdjustment(analysis, params)
 
   return roundToOneDecimal(
     Math.min(THREAT_SCORE_MAX, Math.max(THREAT_SCORE_MIN, effectiveBaseline + adjustment))
+  )
+}
+
+/**
+ * 基线压缩：向中性中心收敛段位差距（灵活局）。系数为 1 时原样返回，单双/匹配局零漂移。
+ */
+function compressBaseline(baseline: number, params: ThreatScoreParams): number {
+  if (params.baselineCompression === 1) {
+    return baseline
+  }
+
+  return (
+    THREAT_SCORE_BASELINE_COMPRESSION_CENTER +
+    (baseline - THREAT_SCORE_BASELINE_COMPRESSION_CENTER) * params.baselineCompression
   )
 }
 
@@ -1032,23 +1154,21 @@ function getThreatScoreBaseline(
   return band.fromScore + (band.toScore - band.fromScore) * ratio
 }
 
-/** 近期表现修正：胜率偏离 + Akari 评分，clamp 到 ±1.5 后按样本量收缩 */
-function getPerformanceAdjustment(analysis: AggregatedAnalysis | null): number {
+/** 近期表现修正：胜率偏离 + Akari 评分，按参数组 clamp 后按样本量收缩 */
+function getPerformanceAdjustment(analysis: AggregatedAnalysis | null, params: ThreatScoreParams) {
   if (!analysis || analysis.count <= 0) {
     return 0
   }
 
-  const winRateAdjustment =
-    (analysis.summary.winRate - 0.5) * THREAT_SCORE_WIN_RATE_ADJUSTMENT_SCALE
+  const winRateAdjustment = (analysis.summary.winRate - 0.5) * params.winRateScale
 
   const akariRatio =
     analysis.akariScore.maxScore > 0 ? analysis.akariScore.total / analysis.akariScore.maxScore : 0
-  const akariAdjustment =
-    (akariRatio - THREAT_SCORE_AKARI_NEUTRAL_RATIO) * THREAT_SCORE_AKARI_ADJUSTMENT_SCALE
+  const akariAdjustment = (akariRatio - THREAT_SCORE_AKARI_NEUTRAL_RATIO) * params.akariScale
 
   const clamped = Math.min(
-    THREAT_SCORE_MAX_ADJUSTMENT,
-    Math.max(-THREAT_SCORE_MAX_ADJUSTMENT, winRateAdjustment + akariAdjustment)
+    params.maxAdjustment,
+    Math.max(-params.maxAdjustment, winRateAdjustment + akariAdjustment)
   )
 
   const shrinkFactor = Math.min(1, analysis.count / THREAT_SCORE_FULL_SAMPLE_COUNT)

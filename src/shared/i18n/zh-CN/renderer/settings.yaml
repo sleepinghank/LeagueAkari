@@ -277,6 +277,19 @@ settings:
           label: Akari Score
         showAverageKillDamageEfficiencyTag:
           label: 场均击杀伤害效率
+    titleAiSituationBrief: AI 研判
+    aiSituationBrief:
+      apiKey:
+        label: DeepSeek API Key
+        description: 配置后启用 AI 研判总结：局势研判卡出现时，将自动请求外部 LLM 生成一段自然语言总结，消耗你自配额度的 token 费用。留空即关闭该功能
+        placeholder: 留空即关闭 AI 研判总结
+      baseUrl:
+        label: Base URL
+        description: OpenAI 兼容端点，默认为 DeepSeek 官方端点，可填写中转地址
+      model:
+        label: 模型
+        description: 默认 deepseek-chat，也可填写其它模型名
+      privacyNote: 隐私说明：启用后，每次生成会把本局十名玩家的昵称、敌我阵营、位置、本局英雄、本局相关段位、威胁分、近期胜率与场次、Akari 评分、特征标签（最多 3 个）、预组队关系，以及你的位置、你的英雄与本局模式，发送给你所配置的 DeepSeek 端点
   multiWindow:
     title: 窗口管理
     auxWindow:
