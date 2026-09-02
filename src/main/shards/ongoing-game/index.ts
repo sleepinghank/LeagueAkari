@@ -15,6 +15,7 @@ import { SettingFactoryMain } from '../setting-factory'
 import { SetterSettingService } from '../setting-factory/setter-setting-service'
 import { SgpMain } from '../sgp'
 import { OngoingGameAdditionalInfoController } from './additional-info-controller'
+import { OngoingGameAiSituationBriefController } from './ai-situation-brief-controller'
 import { OngoingGameAnalysisController } from './analysis-controller'
 import { OngoingGameChampSelectHandoffController } from './champ-select-handoff-controller'
 import {
@@ -54,6 +55,7 @@ export class OngoingGameMain implements IAkariShardInitDispose {
   private readonly _sideEffects: OngoingGameSideEffectsController
   private readonly _champSelectHandoff: OngoingGameChampSelectHandoffController
   private readonly _situationRead: OngoingGameSituationReadController
+  private readonly _aiSituationBrief: OngoingGameAiSituationBriefController
   private readonly _ipcHandlers: OngoingGameIpcHandlers
 
   constructor(
@@ -176,7 +178,8 @@ export class OngoingGameMain implements IAkariShardInitDispose {
       sgp: this._sgpMain,
       savedPlayer: this._savedPlayer,
       featureGating: this._featureGating,
-      championData: this._championDataMain
+      championData: this._championDataMain,
+      appCommon: this._appCommon
     }
 
     this._matchHistory = new OngoingGameMatchHistoryLoader(this._context)
@@ -186,6 +189,7 @@ export class OngoingGameMain implements IAkariShardInitDispose {
     this._sideEffects = new OngoingGameSideEffectsController(this._context)
     this._champSelectHandoff = new OngoingGameChampSelectHandoffController(this._context)
     this._situationRead = new OngoingGameSituationReadController(this._context)
+    this._aiSituationBrief = new OngoingGameAiSituationBriefController(this._context)
     this._ipcHandlers = new OngoingGameIpcHandlers(
       this._context,
       this._matchHistory,
@@ -221,6 +225,7 @@ export class OngoingGameMain implements IAkariShardInitDispose {
       'positionAssignments',
       'analysis',
       'situationRead',
+      'aiSituationBrief',
       'queryStage',
       'teams',
       'isInEog',
@@ -250,6 +255,7 @@ export class OngoingGameMain implements IAkariShardInitDispose {
     this._champSelectHandoff.watch()
     this._analysis.watch()
     this._situationRead.watch()
+    this._aiSituationBrief.watch()
     this._sideEffects.watch()
     this._playerData.watch()
     this._matchHistory.watch()
