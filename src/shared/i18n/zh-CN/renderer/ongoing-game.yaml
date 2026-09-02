@@ -276,6 +276,7 @@ ongoingGame:
     basisRecentWithRank_other: '{{rank}} · 近 {{count}} 场胜率 {{winRate}}%'
     basisRecentOnly_one: '近 {{count}} 场胜率 {{winRate}}%'
     basisRecentOnly_other: '近 {{count}} 场胜率 {{winRate}}%'
+    flexRank: '灵活·{{rank}}'
     openDetailHint: 点击查看完整分析
     featureTags:
       losingStreak_one: '{{count}} 连败'

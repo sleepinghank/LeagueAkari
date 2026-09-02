@@ -301,6 +301,7 @@ ongoingGame:
     basisRecentWithRank_other: '{{rank}} · {{winRate}}% WR in {{count}} recent games'
     basisRecentOnly_one: '{{winRate}}% WR in {{count}} recent game'
     basisRecentOnly_other: '{{winRate}}% WR in {{count}} recent games'
+    flexRank: 'Flex · {{rank}}'
     openDetailHint: Click to open full analysis
     featureTags:
       losingStreak_one: '{{count}} loss streak'
