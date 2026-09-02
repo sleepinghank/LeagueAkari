@@ -13,6 +13,10 @@ import type {
   OngoingGameSimplifiedChampMastery,
   SituationRead
 } from '@shared/shards/ongoing-game'
+import {
+  AI_SITUATION_BRIEF_DEFAULT_BASE_URL,
+  AI_SITUATION_BRIEF_DEFAULT_MODEL
+} from '@shared/shards/ongoing-game/ai-situation-brief'
 import { createDefaultOngoingGamePanelPlayerCardTagSettings } from '@shared/shards/ongoing-game/settings'
 import type { SavedInfo } from '@shared/shards/saved-player'
 import type { RankedStats } from '@shared/types/league-client/ranked'
@@ -78,6 +82,33 @@ export class OngoingGameSettings implements OngoingGameSettingsData {
    * 推测预组队时，需要至少多少局游戏才能被推测
    */
   premadeTeamInferMatchCountThreshold: number = 5
+
+  /**
+   * AI 研判总结：DeepSeek API Key，空为默认态（功能关闭），明文存于本地设置文件
+   */
+  aiSituationBriefApiKey: string = ''
+
+  /**
+   * AI 研判总结：OpenAI 兼容 Base URL，空白时使用官方端点
+   */
+  aiSituationBriefBaseUrl: string = AI_SITUATION_BRIEF_DEFAULT_BASE_URL
+
+  /**
+   * AI 研判总结：模型名
+   */
+  aiSituationBriefModel: string = AI_SITUATION_BRIEF_DEFAULT_MODEL
+
+  setAiSituationBriefApiKey(value: string) {
+    this.aiSituationBriefApiKey = value
+  }
+
+  setAiSituationBriefBaseUrl(value: string) {
+    this.aiSituationBriefBaseUrl = value
+  }
+
+  setAiSituationBriefModel(value: string) {
+    this.aiSituationBriefModel = value
+  }
 
   setOrderPlayerBy(value: OngoingGamePanelOrderPlayerBy) {
     this.orderPlayerBy = value

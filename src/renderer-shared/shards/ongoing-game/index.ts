@@ -118,6 +118,18 @@ export class OngoingGameRenderer implements IAkariShardInitDispose {
     )
   }
 
+  setAiSituationBriefApiKey(value: string) {
+    return this._settingUtils.set(MAIN_SHARD_NAMESPACE, 'aiSituationBriefApiKey', value)
+  }
+
+  setAiSituationBriefBaseUrl(value: string) {
+    return this._settingUtils.set(MAIN_SHARD_NAMESPACE, 'aiSituationBriefBaseUrl', value)
+  }
+
+  setAiSituationBriefModel(value: string) {
+    return this._settingUtils.set(MAIN_SHARD_NAMESPACE, 'aiSituationBriefModel', value)
+  }
+
   reload() {
     this._ipc.call(MAIN_SHARD_NAMESPACE, 'reload')
   }
