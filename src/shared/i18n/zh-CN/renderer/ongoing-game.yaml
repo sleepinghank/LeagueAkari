@@ -270,6 +270,12 @@ ongoingGame:
     insufficientData: 数据不足
     topThreatLabel: 敌方头号威胁
     keyCarryLabel: 我方核心大腿
+    aiBrief:
+      title: AI 研判总结
+      loading: 正在生成 AI 研判总结…
+      errorConfig: AI 研判总结生成失败：API Key 无效，本局不再尝试
+      errorNetwork: AI 研判总结生成失败：网络错误，本局不再尝试
+      errorTimeout: AI 研判总结生成失败：请求超时，本局不再尝试
     secondaryThreat: '次级威胁 {{name}} {{score}}'
     secondaryCarry: '次级核心 {{name}} {{score}}'
     basisRecentWithRank_one: '{{rank}} · 近 {{count}} 场胜率 {{winRate}}%'

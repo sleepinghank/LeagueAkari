@@ -13,6 +13,7 @@
       @dry-run-ongoing-game="handleDryRunOngoingGame"
     />
     <SituationReadCard v-if="hasSituationRead" @navigate="navigateToTabByPuuid" />
+    <AiSituationBriefPanel v-if="hasAiSituationBrief" />
     <MatchupReportBar v-if="hasMatchupReport" />
     <OngoingGameProvider :value="ongoingGame">
       <OngoingGamePanel
@@ -46,6 +47,9 @@ import { computed, ref, shallowRef } from 'vue'
 
 import { useMainWindowAppContext } from '@main-window/context'
 import { PlayerTabsRenderer } from '@main-window/shards/player-tabs'
+import AiSituationBriefPanel, {
+  AI_SITUATION_BRIEF_PANEL_HEIGHT_PX
+} from './situation-read/AiSituationBriefPanel.vue'
 import MatchupReportBar, {
   MATCHUP_REPORT_BAR_HEIGHT_PX
 } from './situation-read/MatchupReportBar.vue'
@@ -86,6 +90,14 @@ const hasSituationRead = computed(() => {
   return (ongoingGameStore.situationRead?.threatRankings?.length ?? 0) > 0
 })
 
+/** 未配置 API Key 时 AI 研判总结区域完全不出现 */
+const hasAiSituationBrief = computed(() => {
+  return (
+    ongoingGameStore.settings.aiSituationBriefApiKey.trim() !== '' &&
+    ongoingGameStore.aiSituationBrief != null
+  )
+})
+
 const hasMatchupReport = computed(() => {
   return ongoingGameStore.situationRead?.matchupReport != null
 })
@@ -99,6 +111,9 @@ const panelContentHeight = computed(() => {
     reservedHeight += hasHighlightCards
       ? SITUATION_READ_CARD_HEIGHT_PX
       : SITUATION_READ_RANKING_ROW_HEIGHT_PX
+  }
+  if (hasAiSituationBrief.value) {
+    reservedHeight += AI_SITUATION_BRIEF_PANEL_HEIGHT_PX
   }
   if (hasMatchupReport.value) {
     reservedHeight += MATCHUP_REPORT_BAR_HEIGHT_PX

@@ -13,7 +13,8 @@ import type {
 } from '@shared/shards/ongoing-game'
 import {
   AI_SITUATION_BRIEF_DEFAULT_BASE_URL,
-  AI_SITUATION_BRIEF_DEFAULT_MODEL
+  AI_SITUATION_BRIEF_DEFAULT_MODEL,
+  type AiSituationBriefStatus
 } from '@shared/shards/ongoing-game/ai-situation-brief'
 import { createDefaultOngoingGamePanelPlayerCardTagSettings } from '@shared/shards/ongoing-game/settings'
 import type { SavedInfo } from '@shared/shards/saved-player'
@@ -67,6 +68,8 @@ export const useOngoingGameStore = defineStore('shard:ongoing-game-renderer', ()
 
   const situationRead = shallowRef<SituationRead | null>(null)
 
+  const aiSituationBrief = shallowRef<AiSituationBriefStatus | null>(null)
+
   const matchHistoryTagParams = shallowRef<Pick<MatchHistoryQueryParams, 'tag' | 'tagsQueryType'>>(
     {}
   )
@@ -110,6 +113,7 @@ export const useOngoingGameStore = defineStore('shard:ongoing-game-renderer', ()
     isInEog,
     analysis,
     situationRead,
+    aiSituationBrief,
     matchHistoryTagParams,
 
     matchHistory,
