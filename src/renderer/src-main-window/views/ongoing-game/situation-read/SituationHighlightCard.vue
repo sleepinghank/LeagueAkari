@@ -59,6 +59,12 @@
 
 <script setup lang="ts">
 import type { SituationFeatureTag, SituationReadHighlight } from '@shared/shards/ongoing-game'
+import {
+  extractFlexRankedEntry,
+  extractSoloRankedEntry,
+  getEffectiveRankedEntry,
+  isFlexQueue
+} from '@shared/shards/ongoing-game'
 import { useAkariResourceProvider } from '@renderer-shared/providers/akari-resource'
 import { useOngoingGameStore } from '@renderer-shared/shards/ongoing-game/store'
 import { useTranslation } from 'i18next-vue'
@@ -107,14 +113,31 @@ const championName = computed(() =>
   hasChampion.value ? resources.champions.name(championId.value) : null
 )
 
+const isFlexQueueGame = computed(() => isFlexQueue(ongoingGameStore.queryStage.gameInfo?.queueId))
+
+/**
+ * 判定依据中的段位来源：与威胁分计算同源——灵活局优先灵活段位（缺失回退单双段位），
+ * 其余队列用单双段位。灵活局实际采用灵活段位时加来源标注，便于校验结论。
+ */
 const rankText = computed(() => {
-  const solo = ongoingGameStore.rankedStats[highlight.puuid]?.queueMap?.['RANKED_SOLO_5x5']
-  if (!solo?.tier || solo.tier === 'NA' || solo.tier === 'NONE') {
+  const rankedStats = ongoingGameStore.rankedStats[highlight.puuid]
+  const flex = extractFlexRankedEntry(rankedStats)
+  const effective = getEffectiveRankedEntry(
+    flex,
+    extractSoloRankedEntry(rankedStats),
+    isFlexQueueGame.value
+  )
+
+  if (!effective) {
     return null
   }
 
-  const division = solo.division && solo.division !== 'NA' ? ` ${solo.division}` : ''
-  return `${t(`shortTiers.${solo.tier}`, { ns: 'common' })}${division}`
+  const division = effective.division && effective.division !== 'NA' ? ` ${effective.division}` : ''
+  const tierText = `${t(`shortTiers.${effective.tier}`, { ns: 'common' })}${division}`
+
+  return isFlexQueueGame.value && flex
+    ? t('ongoingGame.situationRead.flexRank', { rank: tierText })
+    : tierText
 })
 
 const basisText = computed(() => {
