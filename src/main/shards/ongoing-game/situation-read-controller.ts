@@ -10,8 +10,10 @@ import {
   type SituationRead,
   type SituationReadPlayerInput,
   computeSituationRead,
+  extractFlexRankedEntry,
   extractSoloRankedEntry,
-  getSituationReadModeTier
+  getSituationReadModeTier,
+  isFlexQueue
 } from '@shared/shards/ongoing-game'
 import { formatError } from '@shared/utils/errors'
 import { compareStructural } from 'mobx'
@@ -67,6 +69,14 @@ export class OngoingGameSituationReadController {
               }`
           )
           .toSorted(),
+        rankedFlexKeys: Object.entries(state.rankedStats)
+          .map(
+            ([puuid, stats]) =>
+              `${puuid}:${stats.queueMap?.['RANKED_FLEX_SR']?.tier ?? ''}:${
+                stats.queueMap?.['RANKED_FLEX_SR']?.division ?? ''
+              }`
+          )
+          .toSorted(),
         premadeTeamKeys: Object.entries(state.mergedPremadeTeamMap)
           .map(([puuid, group]) => `${puuid}:${group}`)
           .toSorted(),
@@ -117,6 +127,11 @@ export class OngoingGameSituationReadController {
 
   private _getQueueId(): number | null {
     return this._context.state.queryStage.gameInfo?.queueId ?? null
+  }
+
+  /** 本局为灵活排位（queueId 440）时威胁分切换灵活局算法与段位回退链 */
+  private _isFlexQueueGame() {
+    return isFlexQueue(this._getQueueId())
   }
 
   private _getSelfPuuid() {
@@ -258,6 +273,7 @@ export class OngoingGameSituationReadController {
           puuid,
           teamIdentifier,
           rankedSolo: extractSoloRankedEntry(state.rankedStats[puuid]),
+          rankedFlex: extractFlexRankedEntry(state.rankedStats[puuid]),
           analysis: state.analysis?.players[puuid] ?? null
         })
       }
@@ -271,6 +287,7 @@ export class OngoingGameSituationReadController {
       players,
       selfTeamIdentifier: this._getSelfTeamIdentifier(),
       isSuperServerGame: this._isSuperServerGame(),
+      isFlexQueueGame: this._isFlexQueueGame(),
       premadeTeamMap: this._context.state.mergedPremadeTeamMap,
       modeTier,
       matchup: {
