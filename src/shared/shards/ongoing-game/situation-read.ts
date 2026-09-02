@@ -694,7 +694,9 @@ function getPremadeTag(premadeGroupSize: number | null): SituationFeatureTag | n
 }
 
 /** 由预组队映射（puuid → 组标识）得出每个玩家所在组的人数 */
-function getPremadeGroupSizes(premadeTeamMap: Record<string, number> | null): Map<string, number> {
+export function getPremadeGroupSizes(
+  premadeTeamMap: Record<string, number> | null
+): Map<string, number> {
   const groupSizes = new Map<string, number>()
 
   if (!premadeTeamMap) {

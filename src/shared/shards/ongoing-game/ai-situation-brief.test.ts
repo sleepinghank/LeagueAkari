@@ -1,9 +1,15 @@
+import type { AggregatedAnalysis } from '@shared/data-adapter/analysis/player'
+import type { RankedStats } from '@shared/types/league-client/ranked'
 import { describe, expect, it } from 'vitest'
 
 import {
+  AI_SITUATION_BRIEF_RETRY_DELAYS_MS,
   type AiSituationBriefInput,
   type AiSituationBriefPlayerInput,
-  buildAiSituationBriefMessages
+  type AiSituationBriefSource,
+  buildAiSituationBriefInput,
+  buildAiSituationBriefMessages,
+  getAiSituationBriefLanguage
 } from './ai-situation-brief'
 
 function createPlayer(
@@ -279,4 +285,212 @@ describe('buildAiSituationBriefMessages', () => {
       expect(payload.self.champion).toBe(expected.selfChampion)
     }
   )
+})
+
+function createAnalysisFixture(options: {
+  count: number
+  winRate: number
+  akariTotal?: number
+  losingStreak?: number
+}): AggregatedAnalysis {
+  return {
+    count: options.count,
+    summary: { winRate: options.winRate, kdaCv: 0.5 },
+    akariScore: { total: options.akariTotal ?? 0 },
+    winLoss: {
+      all: {
+        count: options.count,
+        winRate: options.winRate,
+        winningStreak: 0,
+        losingStreak: options.losingStreak ?? 0
+      }
+    },
+    spells: { flashOnD: 1, flashOnF: 0 },
+    champions: {}
+  } as unknown as AggregatedAnalysis
+}
+
+function createRankedFixture(options: {
+  solo?: { tier: string; division: string } | null
+  flex?: { tier: string; division: string } | null
+}): RankedStats {
+  return {
+    queueMap: {
+      RANKED_SOLO_5x5: options.solo ?? undefined,
+      RANKED_FLEX_SR: options.flex ?? undefined
+    }
+  } as unknown as RankedStats
+}
+
+function createSource(overrides: Partial<AiSituationBriefSource> = {}): AiSituationBriefSource {
+  return {
+    language: 'zh-CN',
+    queueId: 420,
+    modeTier: 'full',
+    selfPuuid: 'self',
+    teams: { ally: ['self', 'ally-2'], enemy: ['enemy-1'] },
+    summoners: {
+      self: { gameName: 'SelfName', displayName: 'SelfDisplay' },
+      'ally-2': { gameName: '', displayName: 'AllyDisplay' },
+      'enemy-1': { gameName: '', displayName: '' }
+    },
+    championSelections: { self: 238, 'enemy-1': 7 },
+    positionAssignments: { self: 'MIDDLE', 'ally-2': 'NONE', 'enemy-1': 'MIDDLE' },
+    rankedStats: {
+      self: createRankedFixture({ solo: { tier: 'GOLD', division: 'II' } }),
+      'ally-2': createRankedFixture({}),
+      'enemy-1': createRankedFixture({
+        solo: { tier: 'GOLD', division: 'II' },
+        flex: { tier: 'DIAMOND', division: 'I' }
+      })
+    },
+    analysis: {
+      self: createAnalysisFixture({ count: 20, winRate: 0.55, akariTotal: 8.2 }),
+      'enemy-1': createAnalysisFixture({
+        count: 18,
+        winRate: 0.4,
+        akariTotal: 5.1,
+        losingStreak: 4
+      })
+    },
+    premadeTeamMap: { self: 1, 'ally-2': 1 },
+    threatRankings: [
+      { puuid: 'enemy-1', teamIdentifier: 'enemy', score: 6.2 },
+      { puuid: 'self', teamIdentifier: 'ally', score: 5.4 },
+      { puuid: 'ally-2', teamIdentifier: 'ally', score: null }
+    ],
+    championNames: { 7: '李青', 238: '阿卡丽' },
+    ...overrides
+  }
+}
+
+describe('getAiSituationBriefLanguage', () => {
+  it.each([
+    ['zh-CN', 'zh-CN'],
+    ['zh-TW', 'zh-CN'],
+    ['en', 'en'],
+    ['en-US', 'en'],
+    ['', 'en'],
+    [null, 'en'],
+    [undefined, 'en']
+  ])('maps locale %s to %s', (locale, expected) => {
+    expect(getAiSituationBriefLanguage(locale)).toBe(expected)
+  })
+})
+
+describe('AI situation brief retry schedule', () => {
+  it('retries twice with fixed delays of 5s and 15s', () => {
+    expect(AI_SITUATION_BRIEF_RETRY_DELAYS_MS).toEqual([5_000, 15_000])
+  })
+})
+
+describe('buildAiSituationBriefInput', () => {
+  it('maps ongoing-game state data onto prompt player inputs', () => {
+    const input = buildAiSituationBriefInput(createSource())
+    const byPuuid = new Map(input.players.map((player) => [player.name, player]))
+
+    expect(input.language).toBe('zh-CN')
+    expect(input.queueId).toBe(420)
+    expect(input.modeTier).toBe('full')
+    expect(input.self).toEqual({ position: 'MIDDLE', championId: 238 })
+    expect(input.players).toHaveLength(3)
+
+    // 昵称回退链：gameName → displayName → puuid
+    expect(byPuuid.get('SelfName')).toMatchObject({
+      isAlly: true,
+      position: 'MIDDLE',
+      championId: 238,
+      ranked: { tier: 'GOLD', division: 'II' },
+      threatScore: 5.4,
+      recentWinRate: 0.55,
+      recentGameCount: 20,
+      akariScore: 8.2,
+      premadeGroupId: 1
+    })
+    expect(byPuuid.get('AllyDisplay')).toMatchObject({
+      isAlly: true,
+      position: null,
+      championId: null,
+      ranked: null,
+      threatScore: null,
+      recentWinRate: null,
+      recentGameCount: null,
+      akariScore: null,
+      premadeGroupId: 1
+    })
+    expect(byPuuid.get('enemy-1')).toMatchObject({
+      isAlly: false,
+      position: 'MIDDLE',
+      championId: 7,
+      ranked: { tier: 'GOLD', division: 'II' },
+      threatScore: 6.2,
+      recentWinRate: 0.4,
+      recentGameCount: 18,
+      akariScore: 5.1,
+      premadeGroupId: null,
+      featureTags: [{ type: 'losing-streak', count: 4 }]
+    })
+  })
+
+  it('derives feature tags with premade group size from the merged premade map', () => {
+    const input = buildAiSituationBriefInput(
+      createSource({
+        analysis: {
+          self: createAnalysisFixture({ count: 20, winRate: 0.55 }),
+          'ally-2': createAnalysisFixture({ count: 20, winRate: 0.55 }),
+          'enemy-1': createAnalysisFixture({ count: 18, winRate: 0.4 })
+        }
+      })
+    )
+
+    const selfPlayer = input.players.find((player) => player.name === 'SelfName')
+    expect(selfPlayer?.featureTags).toContainEqual({ type: 'premade', size: 2 })
+  })
+
+  it.each([
+    {
+      queueId: 420,
+      solo: { tier: 'GOLD', division: 'II' },
+      flex: { tier: 'DIAMOND', division: 'I' },
+      expected: { tier: 'GOLD', division: 'II' }
+    },
+    {
+      queueId: 430,
+      solo: { tier: 'GOLD', division: 'II' },
+      flex: { tier: 'DIAMOND', division: 'I' },
+      expected: { tier: 'GOLD', division: 'II' }
+    },
+    {
+      queueId: 440,
+      solo: { tier: 'GOLD', division: 'II' },
+      flex: { tier: 'DIAMOND', division: 'I' },
+      expected: { tier: 'DIAMOND', division: 'I' }
+    },
+    {
+      queueId: 440,
+      solo: { tier: 'GOLD', division: 'II' },
+      flex: null,
+      expected: { tier: 'GOLD', division: 'II' }
+    }
+  ])(
+    'resolves the queue-matched rank entry for queue $queueId',
+    ({ queueId, solo, flex, expected }) => {
+      const input = buildAiSituationBriefInput(
+        createSource({
+          queueId,
+          rankedStats: { 'enemy-1': createRankedFixture({ solo, flex }) }
+        })
+      )
+
+      const enemy = input.players.find((player) => player.name === 'enemy-1')
+      expect(enemy?.ranked).toEqual(expected)
+    }
+  )
+
+  it('feeds the assembled input straight into the message builder', () => {
+    const messages = buildAiSituationBriefMessages(buildAiSituationBriefInput(createSource()))
+
+    expect(messages.map((message) => message.role)).toEqual(['system', 'user'])
+    expect(() => JSON.parse(messages[1].content)).not.toThrow()
+  })
 })

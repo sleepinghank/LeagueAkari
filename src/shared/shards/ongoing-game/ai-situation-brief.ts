@@ -1,9 +1,13 @@
+import type { AggregatedAnalysis } from '@shared/data-adapter/analysis/player'
 import { QueueEnum } from '@shared/types/league-client/game-data'
+import type { RankedStats } from '@shared/types/league-client/ranked'
+import type { SummonerInfo } from '@shared/types/league-client/summoner'
 
 import {
   SITUATION_SECONDARY_SCORE_GAP,
   SITUATION_SECONDARY_SCORE_GAP_FLEX,
   type SituationFeatureTag,
+  type SituationPlayerThreat,
   type SituationReadModeTier,
   type SituationReadRankedSolo,
   THREAT_SCORE_APEX_BASELINES,
@@ -12,7 +16,13 @@ import {
   THREAT_SCORE_FULL_SAMPLE_COUNT,
   THREAT_SCORE_SOLO_PARAMS,
   THREAT_SCORE_TIER_BANDS,
-  THREAT_SCORE_UNRANKED_BASELINE
+  THREAT_SCORE_UNRANKED_BASELINE,
+  extractFlexRankedEntry,
+  extractSoloRankedEntry,
+  getEffectiveRankedEntry,
+  getPremadeGroupSizes,
+  isFlexQueue,
+  selectFeatureTags
 } from './situation-read'
 
 /** DeepSeek 官方 OpenAI 兼容端点（Base URL 可在设置中改为中转地址） */
@@ -35,6 +45,33 @@ export function getAiSituationBriefQueueKind(
   queueId: number | null | undefined
 ): AiSituationBriefQueueKind {
   return queueId === QueueEnum.RANK_FLEX ? 'flex' : 'solo'
+}
+
+/**
+ * AI 研判总结请求的错误三分类（与 DeepSeek 客户端的归一结果一致）：
+ * 配置错误（key 无效）/ 网络错误 / 超时。
+ */
+export type AiSituationBriefErrorType = 'config' | 'network' | 'timeout'
+
+/**
+ * AI 研判总结的同步状态：加载占位 / Markdown 内容 / 一行错误文案。
+ * 主进程生成并经既有状态同步机制暴露给渲染层；null 表示本局无 AI 区域。
+ */
+export type AiSituationBriefStatus =
+  | { status: 'loading' }
+  | { status: 'success'; content: string }
+  | { status: 'error'; errorType: AiSituationBriefErrorType }
+
+/** 自动重试时间表：首次失败后间隔 5s、15s 各重试一次，仍失败即终态（本局不再发起） */
+export const AI_SITUATION_BRIEF_RETRY_DELAYS_MS = [5_000, 15_000] as const
+
+/**
+ * 界面语言 → 提示词输出语言：以 zh 开头的 locale 输出简体中文，其余输出英文。
+ */
+export function getAiSituationBriefLanguage(
+  locale: string | null | undefined
+): AiSituationBriefLanguage {
+  return (locale ?? '').toLowerCase().startsWith('zh') ? 'zh-CN' : 'en'
 }
 
 /** 单个玩家的研判数据（已由调用方从研判状态解析，不含 IPC / 网络依赖） */
@@ -371,4 +408,105 @@ export function buildAiSituationBriefMessages(
     { role: 'system', content: getSystemPrompt(input.language, input) },
     { role: 'user', content: JSON.stringify(buildUserPayload(input.language, input), null, 2) }
   ]
+}
+
+/** 组装 AI 研判总结输入所需的对局快照（主进程从既有状态收集） */
+export interface AiSituationBriefSource {
+  language: AiSituationBriefLanguage
+  /** 本局队列（来自对局阶段 gameInfo） */
+  queueId: number | null
+  /** 展示档位；hidden 模式不生成总结（调用方不触发） */
+  modeTier: Exclude<SituationReadModeTier, 'hidden'>
+  /** 我的 puuid；无法识别为 null */
+  selfPuuid: string | null
+  /** 队伍标识 → puuid 列表（既有 teams 状态） */
+  teams: Record<string, string[]>
+  /** puuid → 召唤师信息（昵称来源） */
+  summoners: Record<string, Pick<SummonerInfo, 'gameName' | 'displayName'> | undefined>
+  /** puuid → 本局已锁定英雄 */
+  championSelections: Record<string, number>
+  /** puuid → 位置指派（原样，含 NONE / FILL 等未识别值） */
+  positionAssignments: Record<string, string>
+  /** puuid → 段位数据（本局相关段位按队列从中提取） */
+  rankedStats: Record<string, RankedStats | undefined>
+  /** puuid → 近期对局聚合分析；无战绩为缺失 */
+  analysis: Record<string, AggregatedAnalysis> | null
+  /** 预组队映射（puuid → 组标识），来自既有预组队推断 */
+  premadeTeamMap: Record<string, number>
+  /** 威胁分排行（既有研判结果），用于按 puuid 查威胁分 */
+  threatRankings: SituationPlayerThreat[]
+  /** championId → 英雄显示名（来自 LCU 英雄数据） */
+  championNames: Record<number, string>
+}
+
+/** 位置指派规范化：未指派（空 / NONE）视为无位置 */
+function normalizePosition(position: string | undefined): string | null {
+  return !position || position === 'NONE' ? null : position
+}
+
+function getPlayerDisplayName(
+  summoner: Pick<SummonerInfo, 'gameName' | 'displayName'> | undefined,
+  puuid: string
+): string {
+  return summoner?.gameName || summoner?.displayName || puuid
+}
+
+/**
+ * 从对局快照组装 AI 研判总结输入：昵称回退、敌我判定、按队列取本局相关段位、
+ * 威胁分与近期表现取数、特征标签与预组队关系。纯函数，无 IPC / 网络依赖，
+ * 字段取数与研判卡同源（威胁分排行、selectFeatureTags、getEffectiveRankedEntry）。
+ */
+export function buildAiSituationBriefInput(source: AiSituationBriefSource): AiSituationBriefInput {
+  const isFlexQueueGame = isFlexQueue(source.queueId)
+  const selfTeamIdentifier = source.selfPuuid
+    ? (Object.entries(source.teams).find(([, puuids]) => puuids.includes(source.selfPuuid!))?.[0] ??
+      null)
+    : null
+  const threatScores = new Map(source.threatRankings.map((entry) => [entry.puuid, entry.score]))
+  const premadeGroupSizes = getPremadeGroupSizes(source.premadeTeamMap)
+
+  const players: AiSituationBriefPlayerInput[] = []
+
+  for (const [teamIdentifier, puuids] of Object.entries(source.teams)) {
+    for (const puuid of puuids) {
+      const analysis = source.analysis?.[puuid] ?? null
+      const rankedStats = source.rankedStats[puuid]
+
+      players.push({
+        name: getPlayerDisplayName(source.summoners[puuid], puuid),
+        isAlly: teamIdentifier === selfTeamIdentifier,
+        position: normalizePosition(source.positionAssignments[puuid]),
+        championId: source.championSelections[puuid] || null,
+        ranked: getEffectiveRankedEntry(
+          extractFlexRankedEntry(rankedStats),
+          extractSoloRankedEntry(rankedStats),
+          isFlexQueueGame
+        ),
+        threatScore: threatScores.get(puuid) ?? null,
+        recentWinRate: analysis ? analysis.summary.winRate : null,
+        recentGameCount: analysis ? analysis.count : null,
+        akariScore: analysis ? analysis.akariScore.total : null,
+        featureTags: selectFeatureTags({
+          analysis,
+          premadeGroupSize: premadeGroupSizes.get(puuid) ?? null
+        }),
+        premadeGroupId: source.premadeTeamMap[puuid] ?? null
+      })
+    }
+  }
+
+  return {
+    language: source.language,
+    queueId: source.queueId,
+    modeTier: source.modeTier,
+    self: {
+      position: normalizePosition(
+        source.selfPuuid ? source.positionAssignments[source.selfPuuid] : undefined
+      ),
+      championId:
+        (source.selfPuuid ? source.championSelections[source.selfPuuid] : undefined) || null
+    },
+    championNames: source.championNames,
+    players
+  }
 }

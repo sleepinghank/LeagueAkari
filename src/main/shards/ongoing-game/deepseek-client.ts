@@ -1,11 +1,14 @@
-import { AI_SITUATION_BRIEF_DEFAULT_BASE_URL } from '@shared/shards/ongoing-game'
+import {
+  AI_SITUATION_BRIEF_DEFAULT_BASE_URL,
+  type AiSituationBriefErrorType
+} from '@shared/shards/ongoing-game'
 import axios, { AxiosError } from 'axios'
 
 /** DeepSeek 请求超时时间（毫秒）：超过即视为失败，界面不会无限等待 */
 export const DEEPSEEK_REQUEST_TIMEOUT_MS = 60_000
 
 /** 错误三分类：配置错误（key 无效）/ 网络错误 / 超时 */
-export type DeepSeekRequestErrorType = 'config' | 'network' | 'timeout'
+export type DeepSeekRequestErrorType = AiSituationBriefErrorType
 
 export class DeepSeekRequestError extends Error {
   constructor(
