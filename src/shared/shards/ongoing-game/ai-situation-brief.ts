@@ -2,16 +2,17 @@ import { QueueEnum } from '@shared/types/league-client/game-data'
 
 import {
   SITUATION_SECONDARY_SCORE_GAP,
+  SITUATION_SECONDARY_SCORE_GAP_FLEX,
   type SituationFeatureTag,
   type SituationReadModeTier,
   type SituationReadRankedSolo,
-  THREAT_SCORE_AKARI_ADJUSTMENT_SCALE,
   THREAT_SCORE_APEX_BASELINES,
+  THREAT_SCORE_BASELINE_COMPRESSION_CENTER,
+  THREAT_SCORE_FLEX_PARAMS,
   THREAT_SCORE_FULL_SAMPLE_COUNT,
-  THREAT_SCORE_MAX_ADJUSTMENT,
+  THREAT_SCORE_SOLO_PARAMS,
   THREAT_SCORE_TIER_BANDS,
-  THREAT_SCORE_UNRANKED_BASELINE,
-  THREAT_SCORE_WIN_RATE_ADJUSTMENT_SCALE
+  THREAT_SCORE_UNRANKED_BASELINE
 } from './situation-read'
 
 /** DeepSeek 官方 OpenAI 兼容端点（Base URL 可在设置中改为中转地址） */
@@ -19,18 +20,6 @@ export const AI_SITUATION_BRIEF_DEFAULT_BASE_URL = 'https://api.deepseek.com'
 
 /** 默认模型 */
 export const AI_SITUATION_BRIEF_DEFAULT_MODEL = 'deepseek-chat'
-
-/**
- * 灵活局威胁分参数组（提示词描述用）。
- * 数值依据 `.scratch/situation-read-enhance/spec.md` 的 Implementation Decisions，
- * 与接缝①（威胁分计算层）的灵活局常量组同源维护，二者必须保持一致。
- */
-export const AI_SITUATION_BRIEF_FLEX_BASELINE_COMPRESSION = 0.3
-export const AI_SITUATION_BRIEF_FLEX_BASELINE_NEUTRAL = 5.0
-export const AI_SITUATION_BRIEF_FLEX_WIN_RATE_ADJUSTMENT_SCALE = 4.0
-export const AI_SITUATION_BRIEF_FLEX_AKARI_ADJUSTMENT_SCALE = 4.0
-export const AI_SITUATION_BRIEF_FLEX_MAX_ADJUSTMENT = 3.5
-export const AI_SITUATION_BRIEF_FLEX_SECONDARY_SCORE_GAP = 0.5
 
 /** AI 研判总结的目标输出语言（跟随界面语言） */
 export type AiSituationBriefLanguage = 'zh-CN' | 'en'
@@ -249,15 +238,15 @@ function getScoringStandardSection(
     return queueKind === 'flex'
       ? [
           '- 威胁分 = 段位基线 + 近期表现修正；灵活排位压缩段位影响，以近期表现主导排序；',
-          `- 段位基线先按与单双排相同的段位区间映射（${soloScaleFrom}–${soloScaleTo}，未定级 ${unrankedBaseline}），再向中性值压缩：基线′ = ${formatScale(AI_SITUATION_BRIEF_FLEX_BASELINE_NEUTRAL)} + (基线 − ${formatScale(AI_SITUATION_BRIEF_FLEX_BASELINE_NEUTRAL)}) × ${formatScale(AI_SITUATION_BRIEF_FLEX_BASELINE_COMPRESSION, 2)}；`,
-          `- 近期表现修正 = 胜率偏离 50% 的部分 × ${formatScale(AI_SITUATION_BRIEF_FLEX_WIN_RATE_ADJUSTMENT_SCALE)} + Akari 评分偏离中性的部分 × ${formatScale(AI_SITUATION_BRIEF_FLEX_AKARI_ADJUSTMENT_SCALE)}，上限 ±${formatScale(AI_SITUATION_BRIEF_FLEX_MAX_ADJUSTMENT)}；`,
+          `- 段位基线先按与单双排相同的段位区间映射（${soloScaleFrom}–${soloScaleTo}，未定级 ${unrankedBaseline}），再向中性值压缩：基线′ = ${formatScale(THREAT_SCORE_BASELINE_COMPRESSION_CENTER)} + (基线 − ${formatScale(THREAT_SCORE_BASELINE_COMPRESSION_CENTER)}) × ${formatScale(THREAT_SCORE_FLEX_PARAMS.baselineCompression, 2)}；`,
+          `- 近期表现修正 = 胜率偏离 50% 的部分 × ${formatScale(THREAT_SCORE_FLEX_PARAMS.winRateScale)} + Akari 评分偏离中性的部分 × ${formatScale(THREAT_SCORE_FLEX_PARAMS.akariScale)}，上限 ±${formatScale(THREAT_SCORE_FLEX_PARAMS.maxAdjustment)}；`,
           `- 近期场次不足 ${THREAT_SCORE_FULL_SAMPLE_COUNT} 场时，修正按样本量向基线收缩；`,
-          `- 次级威胁：同队威胁分第二名与最高分分差不超过 ${formatScale(AI_SITUATION_BRIEF_FLEX_SECONDARY_SCORE_GAP)} 时视为双核。`
+          `- 次级威胁：同队威胁分第二名与最高分分差不超过 ${formatScale(SITUATION_SECONDARY_SCORE_GAP_FLEX)} 时视为双核。`
         ].join('\n')
       : [
           '- 威胁分 = 段位基线 + 近期表现修正，以段位为主导；',
           `- 段位基线由段位映射到 ${soloScaleFrom}（黑铁最低）至 ${soloScaleTo}（王者最高），未定级基线为 ${unrankedBaseline}；`,
-          `- 近期表现修正 = 胜率偏离 50% 的部分 × ${formatScale(THREAT_SCORE_WIN_RATE_ADJUSTMENT_SCALE)} + Akari 评分偏离中性的部分 × ${formatScale(THREAT_SCORE_AKARI_ADJUSTMENT_SCALE)}，上限 ±${formatScale(THREAT_SCORE_MAX_ADJUSTMENT)}；`,
+          `- 近期表现修正 = 胜率偏离 50% 的部分 × ${formatScale(THREAT_SCORE_SOLO_PARAMS.winRateScale)} + Akari 评分偏离中性的部分 × ${formatScale(THREAT_SCORE_SOLO_PARAMS.akariScale)}，上限 ±${formatScale(THREAT_SCORE_SOLO_PARAMS.maxAdjustment)}；`,
           `- 近期场次不足 ${THREAT_SCORE_FULL_SAMPLE_COUNT} 场时，修正按样本量向基线收缩；`,
           `- 次级威胁：同队威胁分第二名与最高分分差不超过 ${formatScale(SITUATION_SECONDARY_SCORE_GAP)} 时视为双核。`
         ].join('\n')
@@ -266,15 +255,15 @@ function getScoringStandardSection(
   return queueKind === 'flex'
     ? [
         `- Threat score = rank baseline + recent-performance adjustment. In ranked flex, rank influence is compressed and recent performance dominates.`,
-        `- The rank baseline is first mapped with the same tier scale as solo queue (${soloScaleFrom}–${soloScaleTo}, unranked ${unrankedBaseline}), then compressed toward the neutral value: baseline' = ${formatScale(AI_SITUATION_BRIEF_FLEX_BASELINE_NEUTRAL)} + (baseline − ${formatScale(AI_SITUATION_BRIEF_FLEX_BASELINE_NEUTRAL)}) × ${formatScale(AI_SITUATION_BRIEF_FLEX_BASELINE_COMPRESSION, 2)}.`,
-        `- The recent-performance adjustment = (win rate deviation from 50%) × ${formatScale(AI_SITUATION_BRIEF_FLEX_WIN_RATE_ADJUSTMENT_SCALE)} + (Akari score deviation from neutral) × ${formatScale(AI_SITUATION_BRIEF_FLEX_AKARI_ADJUSTMENT_SCALE)}, capped at ±${formatScale(AI_SITUATION_BRIEF_FLEX_MAX_ADJUSTMENT)}.`,
+        `- The rank baseline is first mapped with the same tier scale as solo queue (${soloScaleFrom}–${soloScaleTo}, unranked ${unrankedBaseline}), then compressed toward the neutral value: baseline' = ${formatScale(THREAT_SCORE_BASELINE_COMPRESSION_CENTER)} + (baseline − ${formatScale(THREAT_SCORE_BASELINE_COMPRESSION_CENTER)}) × ${formatScale(THREAT_SCORE_FLEX_PARAMS.baselineCompression, 2)}.`,
+        `- The recent-performance adjustment = (win rate deviation from 50%) × ${formatScale(THREAT_SCORE_FLEX_PARAMS.winRateScale)} + (Akari score deviation from neutral) × ${formatScale(THREAT_SCORE_FLEX_PARAMS.akariScale)}, capped at ±${formatScale(THREAT_SCORE_FLEX_PARAMS.maxAdjustment)}.`,
         `- With fewer than ${THREAT_SCORE_FULL_SAMPLE_COUNT} recent games, the adjustment shrinks toward the baseline proportionally to the sample size.`,
-        `- Secondary threat: a teammate within ${formatScale(AI_SITUATION_BRIEF_FLEX_SECONDARY_SCORE_GAP)} of the highest threat score counts as a second core.`
+        `- Secondary threat: a teammate within ${formatScale(SITUATION_SECONDARY_SCORE_GAP_FLEX)} of the highest threat score counts as a second core.`
       ].join('\n')
     : [
         `- Threat score = rank baseline + recent-performance adjustment, with rank as the dominant factor.`,
         `- The rank baseline maps tiers onto ${soloScaleFrom} (lowest, Iron) to ${soloScaleTo} (highest, Challenger); unranked players use ${unrankedBaseline}.`,
-        `- The recent-performance adjustment = (win rate deviation from 50%) × ${formatScale(THREAT_SCORE_WIN_RATE_ADJUSTMENT_SCALE)} + (Akari score deviation from neutral) × ${formatScale(THREAT_SCORE_AKARI_ADJUSTMENT_SCALE)}, capped at ±${formatScale(THREAT_SCORE_MAX_ADJUSTMENT)}.`,
+        `- The recent-performance adjustment = (win rate deviation from 50%) × ${formatScale(THREAT_SCORE_SOLO_PARAMS.winRateScale)} + (Akari score deviation from neutral) × ${formatScale(THREAT_SCORE_SOLO_PARAMS.akariScale)}, capped at ±${formatScale(THREAT_SCORE_SOLO_PARAMS.maxAdjustment)}.`,
         `- With fewer than ${THREAT_SCORE_FULL_SAMPLE_COUNT} recent games, the adjustment shrinks toward the baseline proportionally to the sample size.`,
         `- Secondary threat: a teammate within ${formatScale(SITUATION_SECONDARY_SCORE_GAP)} of the highest threat score counts as a second core.`
       ].join('\n')
