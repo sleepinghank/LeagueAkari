@@ -2,6 +2,7 @@ import type { AggregatedAnalysis } from '@shared/data-adapter/analysis/player'
 import type { AggregatedTeamAnalysis } from '@shared/data-adapter/analysis/team'
 import type { ParsedRole } from '@shared/utils/ranked'
 
+export * from './ai-situation-brief'
 export * from './reload'
 export * from './settings'
 export * from './situation-read'
