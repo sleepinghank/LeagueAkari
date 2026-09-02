@@ -1,10 +1,5 @@
 export type OngoingGamePanelOrderPlayerBy =
-  | 'win-rate'
-  | 'kda'
-  | 'default'
-  | 'akari-score'
-  | 'position'
-  | 'premade-team'
+  'win-rate' | 'kda' | 'default' | 'akari-score' | 'position' | 'premade-team'
 
 export type OngoingGamePanelChampionUsage = 'recent' | 'mastery' | 'none'
 
@@ -52,6 +47,12 @@ export interface OngoingGameSettingsData extends OngoingGamePanelSettings {
   autoRouteWhenGameStarts: boolean
   queryInLobbyPhase: boolean
   premadeTeamInferMatchCountThreshold: number
+  /** AI 研判总结：DeepSeek API Key（明文存于本地设置文件）；空为默认态，即功能关闭 */
+  aiSituationBriefApiKey: string
+  /** AI 研判总结：OpenAI 兼容 Base URL，默认官方端点，可填中转 */
+  aiSituationBriefBaseUrl: string
+  /** AI 研判总结：模型名，默认 deepseek-chat */
+  aiSituationBriefModel: string
 }
 
 export const DEFAULT_ONGOING_GAME_PANEL_PLAYER_CARD_TAG_SETTINGS =

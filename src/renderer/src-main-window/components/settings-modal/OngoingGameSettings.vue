@@ -436,6 +436,59 @@
           </div>
         </SettingsRow>
       </SettingsSection>
+
+      <SettingsSection
+        setting-id="ongoing-game.ai-situation-brief"
+        :title="t('settings.ongoingGame.titleAiSituationBrief')"
+        :footer="t('settings.ongoingGame.aiSituationBrief.privacyNote')"
+      >
+        <SettingsRow
+          setting-id="ongoing-game.ai-situation-brief.api-key"
+          :label="t('settings.ongoingGame.aiSituationBrief.apiKey.label')"
+          :label-description="t('settings.ongoingGame.aiSituationBrief.apiKey.description')"
+          :label-width="400"
+        >
+          <NInput
+            class="w-60!"
+            size="small"
+            type="password"
+            show-password-on="click"
+            :value="ogs.settings.aiSituationBriefApiKey"
+            :placeholder="t('settings.ongoingGame.aiSituationBrief.apiKey.placeholder')"
+            @update:value="(val) => og.setAiSituationBriefApiKey(val)"
+          />
+        </SettingsRow>
+
+        <SettingsRow
+          setting-id="ongoing-game.ai-situation-brief.base-url"
+          :label="t('settings.ongoingGame.aiSituationBrief.baseUrl.label')"
+          :label-description="t('settings.ongoingGame.aiSituationBrief.baseUrl.description')"
+          :label-width="400"
+        >
+          <NInput
+            class="w-60!"
+            size="small"
+            :value="ogs.settings.aiSituationBriefBaseUrl"
+            :placeholder="AI_SITUATION_BRIEF_DEFAULT_BASE_URL"
+            @update:value="(val) => og.setAiSituationBriefBaseUrl(val)"
+          />
+        </SettingsRow>
+
+        <SettingsRow
+          setting-id="ongoing-game.ai-situation-brief.model"
+          :label="t('settings.ongoingGame.aiSituationBrief.model.label')"
+          :label-description="t('settings.ongoingGame.aiSituationBrief.model.description')"
+          :label-width="400"
+        >
+          <NInput
+            class="w-60!"
+            size="small"
+            :value="ogs.settings.aiSituationBriefModel"
+            :placeholder="AI_SITUATION_BRIEF_DEFAULT_MODEL"
+            @update:value="(val) => og.setAiSituationBriefModel(val)"
+          />
+        </SettingsRow>
+      </SettingsSection>
     </div>
   </NScrollbar>
 </template>
@@ -443,12 +496,16 @@
 <script setup lang="ts">
 import SettingsRow from '@main-window/settings-navigation/NavigableSettingsRow.vue'
 import SettingsSection from '@main-window/settings-navigation/NavigableSettingsSection.vue'
+import {
+  AI_SITUATION_BRIEF_DEFAULT_BASE_URL,
+  AI_SITUATION_BRIEF_DEFAULT_MODEL
+} from '@shared/shards/ongoing-game/ai-situation-brief'
 import { useInstance } from '@renderer-shared/shards'
 import { useAppCommonStore } from '@renderer-shared/shards/app-common/store'
 import { OngoingGameRenderer } from '@renderer-shared/shards/ongoing-game'
 import { useOngoingGameStore } from '@renderer-shared/shards/ongoing-game/store'
 import { useTranslation } from 'i18next-vue'
-import { NCheckbox, NInputNumber, NRadio, NRadioGroup, NScrollbar, NSwitch } from 'naive-ui'
+import { NCheckbox, NInput, NInputNumber, NRadio, NRadioGroup, NScrollbar, NSwitch } from 'naive-ui'
 
 const { t } = useTranslation()
 

@@ -11,6 +11,10 @@ import type {
   QueryStage,
   SituationRead
 } from '@shared/shards/ongoing-game'
+import {
+  AI_SITUATION_BRIEF_DEFAULT_BASE_URL,
+  AI_SITUATION_BRIEF_DEFAULT_MODEL
+} from '@shared/shards/ongoing-game/ai-situation-brief'
 import { createDefaultOngoingGamePanelPlayerCardTagSettings } from '@shared/shards/ongoing-game/settings'
 import type { SavedInfo } from '@shared/shards/saved-player'
 import type { RankedStats } from '@shared/types/league-client/ranked'
@@ -41,7 +45,11 @@ export const useOngoingGameStore = defineStore('shard:ongoing-game-renderer', ()
     showJunglePathingForAllPlayers: false,
     autoRouteWhenGameStarts: false,
     playerCardTags: createDefaultOngoingGamePanelPlayerCardTagSettings(),
-    queryInLobbyPhase: true
+    queryInLobbyPhase: true,
+
+    aiSituationBriefApiKey: '',
+    aiSituationBriefBaseUrl: AI_SITUATION_BRIEF_DEFAULT_BASE_URL,
+    aiSituationBriefModel: AI_SITUATION_BRIEF_DEFAULT_MODEL
   })
 
   const championSelections = shallowRef<Record<string, number>>({})

@@ -139,6 +139,18 @@ export class OngoingGameMain implements IAkariShardInitDispose {
         premadeTeamInferMatchCountThreshold: {
           default: this.settings.premadeTeamInferMatchCountThreshold,
           schema: z.number()
+        },
+        aiSituationBriefApiKey: {
+          default: this.settings.aiSituationBriefApiKey,
+          schema: z.string()
+        },
+        aiSituationBriefBaseUrl: {
+          default: this.settings.aiSituationBriefBaseUrl,
+          schema: z.string()
+        },
+        aiSituationBriefModel: {
+          default: this.settings.aiSituationBriefModel,
+          schema: z.string()
         }
       },
       this.settings
@@ -198,7 +210,10 @@ export class OngoingGameMain implements IAkariShardInitDispose {
       'autoRouteWhenGameStarts',
       'playerCardTags',
       'queryInLobbyPhase',
-      'premadeTeamInferMatchCountThreshold'
+      'premadeTeamInferMatchCountThreshold',
+      'aiSituationBriefApiKey',
+      'aiSituationBriefBaseUrl',
+      'aiSituationBriefModel'
     ])
 
     this._mobxUtils.propSync(OngoingGameMain.id, 'state', this.state, [
