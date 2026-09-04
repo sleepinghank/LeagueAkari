@@ -295,12 +295,12 @@ ongoingGame:
     insufficientData: Insufficient data
     topThreatLabel: Enemy Top Threat
     keyCarryLabel: Ally Key Carry
-    aiBrief:
-      title: AI Situation Brief
-      loading: Generating the AI situation brief...
-      errorConfig: 'AI situation brief failed: invalid API key. No more attempts this game'
-      errorNetwork: 'AI situation brief failed: network error. No more attempts this game'
-      errorTimeout: 'AI situation brief failed: request timed out. No more attempts this game'
+    allyBrief:
+      title: Ally Brief
+      loading: Generating the ally brief...
+      errorConfig: 'Ally brief failed: invalid API key. No more attempts this game'
+      errorNetwork: 'Ally brief failed: network error. No more attempts this game'
+      errorTimeout: 'Ally brief failed: request timed out. No more attempts this game'
     secondaryThreat: 'Secondary threat: {{name}} ({{score}})'
     secondaryCarry: 'Secondary carry: {{name}} ({{score}})'
     basisRecentWithRank_one: '{{rank}} · {{winRate}}% WR in {{count}} recent game'

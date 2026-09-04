@@ -1,14 +1,11 @@
-import {
-  AI_SITUATION_BRIEF_DEFAULT_BASE_URL,
-  type AiSituationBriefErrorType
-} from '@shared/shards/ongoing-game'
+import { AI_BRIEF_DEFAULT_BASE_URL, type AiBriefErrorType } from '@shared/shards/ongoing-game'
 import axios, { AxiosError } from 'axios'
 
 /** DeepSeek 请求超时时间（毫秒）：超过即视为失败，界面不会无限等待 */
 export const DEEPSEEK_REQUEST_TIMEOUT_MS = 60_000
 
 /** 错误三分类：配置错误（key 无效）/ 网络错误 / 超时 */
-export type DeepSeekRequestErrorType = AiSituationBriefErrorType
+export type DeepSeekRequestErrorType = AiBriefErrorType
 
 export class DeepSeekRequestError extends Error {
   constructor(
@@ -38,7 +35,7 @@ const TIMEOUT_ERROR_CODES = new Set(['ECONNABORTED', 'ETIMEDOUT'])
 
 function normalizeBaseUrl(baseUrl: string | null | undefined): string {
   const trimmed = (baseUrl ?? '').trim()
-  return trimmed ? trimmed.replace(/\/+$/, '') : AI_SITUATION_BRIEF_DEFAULT_BASE_URL
+  return trimmed ? trimmed.replace(/\/+$/, '') : AI_BRIEF_DEFAULT_BASE_URL
 }
 
 function classifyRequestError(error: unknown): DeepSeekRequestError {
@@ -60,7 +57,7 @@ function classifyRequestError(error: unknown): DeepSeekRequestError {
 /**
  * DeepSeek 薄封装：OpenAI 兼容的 chat/completions 端点，非流式，60s 超时。
  * 空 API Key 不发起请求（直接抛配置错误）；错误统一归类为配置错误 / 网络错误 / 超时三类。
- * 不做日志与重试——由 AI 研判总结的生成逻辑负责。
+ * 不做日志与重试——由 AI 简报的生成逻辑负责。
  */
 export async function requestDeepSeekChatCompletion(options: {
   apiKey: string

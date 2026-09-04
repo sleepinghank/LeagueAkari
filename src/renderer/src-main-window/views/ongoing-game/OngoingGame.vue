@@ -13,7 +13,7 @@
       @dry-run-ongoing-game="handleDryRunOngoingGame"
     />
     <SituationReadCard v-if="hasSituationRead" @navigate="navigateToTabByPuuid" />
-    <AiSituationBriefPanel v-if="hasAiSituationBrief" />
+    <AllyBriefPanel v-if="hasAllyBrief" />
     <MatchupReportBar v-if="hasMatchupReport" />
     <OngoingGameProvider :value="ongoingGame">
       <OngoingGamePanel
@@ -47,9 +47,7 @@ import { computed, ref, shallowRef } from 'vue'
 
 import { useMainWindowAppContext } from '@main-window/context'
 import { PlayerTabsRenderer } from '@main-window/shards/player-tabs'
-import AiSituationBriefPanel, {
-  AI_SITUATION_BRIEF_PANEL_HEIGHT_PX
-} from './situation-read/AiSituationBriefPanel.vue'
+import AllyBriefPanel, { ALLY_BRIEF_PANEL_HEIGHT_PX } from './situation-read/AllyBriefPanel.vue'
 import MatchupReportBar, {
   MATCHUP_REPORT_BAR_HEIGHT_PX
 } from './situation-read/MatchupReportBar.vue'
@@ -90,11 +88,17 @@ const hasSituationRead = computed(() => {
   return (ongoingGameStore.situationRead?.threatRankings?.length ?? 0) > 0
 })
 
-/** 未配置 API Key 时 AI 研判总结区域完全不出现 */
-const hasAiSituationBrief = computed(() => {
+/**
+ * 我方简报区域仅在对局阶段（选人 / 游戏中）且已配置 API Key、状态存在时出现；
+ * 大厅、排队等非对局阶段不显示，未配置 Key 时完全不出现。
+ */
+const hasAllyBrief = computed(() => {
+  const phase = ongoingGameStore.queryStage.phase
+
   return (
+    (phase === 'champ-select' || phase === 'in-game') &&
     ongoingGameStore.settings.aiSituationBriefApiKey.trim() !== '' &&
-    ongoingGameStore.aiSituationBrief != null
+    ongoingGameStore.allyBrief != null
   )
 })
 
@@ -112,8 +116,8 @@ const panelContentHeight = computed(() => {
       ? SITUATION_READ_CARD_HEIGHT_PX
       : SITUATION_READ_RANKING_ROW_HEIGHT_PX
   }
-  if (hasAiSituationBrief.value) {
-    reservedHeight += AI_SITUATION_BRIEF_PANEL_HEIGHT_PX
+  if (hasAllyBrief.value) {
+    reservedHeight += ALLY_BRIEF_PANEL_HEIGHT_PX
   }
   if (hasMatchupReport.value) {
     reservedHeight += MATCHUP_REPORT_BAR_HEIGHT_PX

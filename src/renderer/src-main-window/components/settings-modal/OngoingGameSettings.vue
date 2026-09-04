@@ -469,7 +469,7 @@
             class="w-60!"
             size="small"
             :value="ogs.settings.aiSituationBriefBaseUrl"
-            :placeholder="AI_SITUATION_BRIEF_DEFAULT_BASE_URL"
+            :placeholder="AI_BRIEF_DEFAULT_BASE_URL"
             @update:value="(val) => og.setAiSituationBriefBaseUrl(val)"
           />
         </SettingsRow>
@@ -484,7 +484,7 @@
             class="w-60!"
             size="small"
             :value="ogs.settings.aiSituationBriefModel"
-            :placeholder="AI_SITUATION_BRIEF_DEFAULT_MODEL"
+            :placeholder="AI_BRIEF_DEFAULT_MODEL"
             @update:value="(val) => og.setAiSituationBriefModel(val)"
           />
         </SettingsRow>
@@ -497,9 +497,9 @@
 import SettingsRow from '@main-window/settings-navigation/NavigableSettingsRow.vue'
 import SettingsSection from '@main-window/settings-navigation/NavigableSettingsSection.vue'
 import {
-  AI_SITUATION_BRIEF_DEFAULT_BASE_URL,
-  AI_SITUATION_BRIEF_DEFAULT_MODEL
-} from '@shared/shards/ongoing-game/ai-situation-brief'
+  AI_BRIEF_DEFAULT_BASE_URL,
+  AI_BRIEF_DEFAULT_MODEL
+} from '@shared/shards/ongoing-game/ai-brief'
 import { useInstance } from '@renderer-shared/shards'
 import { useAppCommonStore } from '@renderer-shared/shards/app-common/store'
 import { OngoingGameRenderer } from '@renderer-shared/shards/ongoing-game'
