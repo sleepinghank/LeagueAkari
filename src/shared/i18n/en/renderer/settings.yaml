@@ -283,7 +283,7 @@ settings:
     aiSituationBrief:
       apiKey:
         label: DeepSeek API Key
-        description: When configured, AI briefs are enabled. In champ select, once the ally data is ready, the external LLM is automatically requested to generate an ally brief that covers only your own team, consuming tokens from your own quota. Leave empty to keep the feature off
+        description: When configured, AI briefs are enabled. An ally brief covering only your own team is generated in champ select once the ally data is ready, and an enemy brief is generated when the game starts, consuming tokens from your own quota (at most 3 requests per game). Leave empty to keep the feature off
         placeholder: Leave empty to disable AI briefs
       baseUrl:
         label: Base URL
@@ -291,7 +291,7 @@ settings:
       model:
         label: Model
         description: Defaults to deepseek-chat; other model names are accepted
-      privacyNote: "Privacy note: when enabled, every generation sends the following data to your configured DeepSeek endpoint — the five summoner names on your team, positions, champions picked this game, ranks relevant to this game, threat scores, recent win rates and game counts, Akari scores, feature tags (up to 3), and premade relations, plus your own position, your champion, and the game mode"
+      privacyNote: "Privacy note: when enabled, every generation sends data to your configured endpoint. The ally brief sends the five players on your team — summoner names, positions, champions picked this game, ranks relevant to this game, threat scores, recent win rates and game counts, Akari scores, feature tags (up to 3), and premade relations — plus your own position, your champion, and the game mode. The enemy brief additionally sends the same categories of data for the five enemy players, plus the names, positions, and champions of your team's five players for matchup context"
   multiWindow:
     title: Multi-Window
     auxWindow:

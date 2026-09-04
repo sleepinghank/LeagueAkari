@@ -117,6 +117,40 @@ export interface AllyBriefInput {
   players: AiBriefPlayerInput[]
 }
 
+/**
+ * 敌方简报中的我方阵容对照项：只含定位对位关系所需的字段
+ * （我对线的人、我方打野），不含任何评级数据——我方评级由我方简报负责。
+ */
+export interface EnemyBriefAllyReference {
+  name: string
+  position: string | null
+  championId: number | null
+}
+
+/**
+ * 敌方简报输入：敌方 5 人研判数据 + 我方阵容对照（用于对位建议），
+ * 不含对我方玩家的评级输出要求。
+ */
+export interface EnemyBriefInput {
+  /** 目标输出语言 */
+  language: AiBriefLanguage
+  /** 本局队列；null 时按单双/匹配描述 */
+  queueId: number | null
+  /** 展示档位：basic（大乱斗）裁剪位置与对位维度；hidden 不生成简报 */
+  modeTier: Exclude<SituationReadModeTier, 'hidden'>
+  /** 我的上下文（定位"我对线的人"与提出对位建议的出发点） */
+  self: {
+    position: string | null
+    championId: number | null
+  }
+  /** championId → 英雄显示名（来自 LCU 英雄数据）；缺失时回退为 #<id> */
+  championNames: Record<number, string>
+  /** 敌方玩家的研判数据 */
+  players: AiBriefPlayerInput[]
+  /** 我方阵容对照（仅昵称 / 位置 / 本局英雄） */
+  allyPlayers: EnemyBriefAllyReference[]
+}
+
 /** OpenAI 兼容的消息结构，DeepSeek 客户端直接作为请求体使用（两份简报共用） */
 export interface AiBriefMessage {
   role: 'system' | 'user'
@@ -180,7 +214,10 @@ function formatScale(value: number, fractionDigits = 1): string {
   return value.toFixed(fractionDigits)
 }
 
-function getModeLabel(language: AiBriefLanguage, input: AllyBriefInput): string {
+function getModeLabel(
+  language: AiBriefLanguage,
+  input: Pick<AllyBriefInput, 'queueId' | 'modeTier'>
+): string {
   if (input.modeTier === 'basic') {
     return language === 'zh-CN' ? '极地大乱斗' : 'ARAM'
   }
@@ -218,12 +255,15 @@ function getRankLabel(
   return APEX_TIERS.has(ranked.tier) ? tierLabel : `${tierLabel} ${ranked.division}`
 }
 
-function getChampionLabel(input: AllyBriefInput, championId: number | null): string | null {
+function getChampionLabel(
+  championNames: Record<number, string>,
+  championId: number | null
+): string | null {
   if (championId === null) {
     return null
   }
 
-  return input.championNames[championId] ?? `#${championId}`
+  return championNames[championId] ?? `#${championId}`
 }
 
 function getFeatureTagLabel(
@@ -299,7 +339,7 @@ function getScoringStandardSection(language: AiBriefLanguage, queueKind: AiBrief
       ].join('\n')
 }
 
-function getSystemPrompt(language: AiBriefLanguage, input: AllyBriefInput): string {
+function getAllySystemPrompt(language: AiBriefLanguage, input: AllyBriefInput): string {
   const queueKind = getAiBriefQueueKind(input.queueId)
   const modeLabel = getModeLabel(language, input)
   const isBasic = input.modeTier === 'basic'
@@ -353,40 +393,62 @@ function getSystemPrompt(language: AiBriefLanguage, input: AllyBriefInput): stri
   ].join('\n')
 }
 
-function buildUserPayload(language: AiBriefLanguage, input: AllyBriefInput) {
+/** 序列化单个玩家的研判数据为外发记录（两份简报共用，字段清单与设置区隐私说明一致） */
+function serializePlayer(
+  language: AiBriefLanguage,
+  player: AiBriefPlayerInput,
+  championNames: Record<number, string>,
+  isBasic: boolean
+) {
   const insufficientData = INSUFFICIENT_DATA_LABELS[language]
+  const record: Record<string, unknown> = {
+    name: player.name
+  }
+
+  if (!isBasic) {
+    record.position = getPositionLabel(language, player.position)
+  }
+
+  record.champion = getChampionLabel(championNames, player.championId)
+  record.rank = getRankLabel(language, player.ranked)
+  record.threatScore = player.threatScore ?? insufficientData
+  record.recentWinRate = player.recentWinRate ?? insufficientData
+  record.recentGameCount = player.recentGameCount ?? insufficientData
+  record.akariScore = player.akariScore ?? insufficientData
+  record.featureTags = player.featureTags
+    .slice(0, 3)
+    .map((tag) => getFeatureTagLabel(language, tag, championNames))
+  record.premadeGroup = player.premadeGroupId
+
+  return record
+}
+
+/** 序列化"我"的上下文（两份简报共用）；basic 模式不含位置 */
+function serializeSelf(
+  language: AiBriefLanguage,
+  self: { position: string | null; championId: number | null },
+  championNames: Record<number, string>,
+  isBasic: boolean
+) {
+  if (isBasic) {
+    return { champion: getChampionLabel(championNames, self.championId) }
+  }
+
+  return {
+    position: getPositionLabel(language, self.position),
+    champion: getChampionLabel(championNames, self.championId)
+  }
+}
+
+function buildUserPayload(language: AiBriefLanguage, input: AllyBriefInput) {
   const isBasic = input.modeTier === 'basic'
 
   return {
     mode: getModeLabel(language, input),
-    self: isBasic
-      ? { champion: getChampionLabel(input, input.self.championId) }
-      : {
-          position: getPositionLabel(language, input.self.position),
-          champion: getChampionLabel(input, input.self.championId)
-        },
-    players: input.players.map((player) => {
-      const record: Record<string, unknown> = {
-        name: player.name
-      }
-
-      if (!isBasic) {
-        record.position = getPositionLabel(language, player.position)
-      }
-
-      record.champion = getChampionLabel(input, player.championId)
-      record.rank = getRankLabel(language, player.ranked)
-      record.threatScore = player.threatScore ?? insufficientData
-      record.recentWinRate = player.recentWinRate ?? insufficientData
-      record.recentGameCount = player.recentGameCount ?? insufficientData
-      record.akariScore = player.akariScore ?? insufficientData
-      record.featureTags = player.featureTags
-        .slice(0, 3)
-        .map((tag) => getFeatureTagLabel(language, tag, input.championNames))
-      record.premadeGroup = player.premadeGroupId
-
-      return record
-    })
+    self: serializeSelf(language, input.self, input.championNames, isBasic),
+    players: input.players.map((player) =>
+      serializePlayer(language, player, input.championNames, isBasic)
+    )
   }
 }
 
@@ -397,13 +459,120 @@ function buildUserPayload(language: AiBriefLanguage, input: AllyBriefInput) {
  */
 export function buildAllyBriefMessages(input: AllyBriefInput): AiBriefMessage[] {
   return [
-    { role: 'system', content: getSystemPrompt(input.language, input) },
+    { role: 'system', content: getAllySystemPrompt(input.language, input) },
     { role: 'user', content: JSON.stringify(buildUserPayload(input.language, input), null, 2) }
   ]
 }
 
-/** 组装我方简报输入所需的对局快照（主进程从既有状态收集） */
-export interface AllyBriefSource {
+function getEnemySystemPrompt(language: AiBriefLanguage, input: EnemyBriefInput): string {
+  const queueKind = getAiBriefQueueKind(input.queueId)
+  const modeLabel = getModeLabel(language, input)
+  const isBasic = input.modeTier === 'basic'
+
+  if (language === 'zh-CN') {
+    const introLine = isBasic
+      ? '你是《英雄联盟》开局局势解读助手。用户正处于一局大乱斗对局中，你将收到敌方队伍（下称“敌方”）五名玩家的局势研判数据，以及我方阵容对照（仅昵称与本局英雄），请为用户（下称“我”）生成一段敌方简报，帮助其开局就知道该躲谁。'
+      : '你是《英雄联盟》开局局势解读助手。用户正处于一局游戏中，你将收到敌方队伍（下称“敌方”）五名玩家的局势研判数据，以及我方阵容对照（仅昵称、位置与本局英雄，用于对位建议），请为用户（下称“我”）生成一段敌方简报，帮助其开局就知道该防谁、资源往哪倾斜。'
+    const dimensionLine = isBasic
+      ? '3. 每条结论综合五个维度评估：英雄玩法（定位、强势期、节奏）、玩家风格（近期战绩、常用英雄）、段位与胜率、威胁分。'
+      : '3. 每条结论综合五个维度评估：英雄玩法（定位、强势期、节奏）、玩家风格（近期战绩、常用英雄）、位置、段位与胜率、威胁分。'
+    const focusLine = isBasic
+      ? '4. 聚焦：威胁分布（头号威胁怎么应对）、打法建议。'
+      : '4. 聚焦：威胁分布（头号威胁怎么应对）、对照我方阵容的对位应对（我对线的人怎么打、敌方打野大概几级来抓）、打法建议。'
+
+    return [
+      introLine,
+      '',
+      '【背景设定】',
+      '- 威胁分：本地工具对玩家综合实力的评估，0–10 分，分数越高越可能左右胜负；',
+      '- Akari 评分：近期发挥评分，满分约 16.67，分数越高近期状态越好，不含段位因素。',
+      '',
+      `【威胁分评分标准 · ${modeLabel}】`,
+      getScoringStandardSection(language, queueKind),
+      '',
+      '【输出要求】',
+      '1. 使用简体中文撰写。',
+      '2. 输出 3–5 条总纲式综合研判与打法建议，不逐人罗列（逐人数据用户已可在界面查看）。',
+      dimensionLine,
+      focusLine,
+      '5. 结论性判断（如敌方头号威胁）一律以数据中的威胁分排序为准，不得另立排名；不重新评估或输出我方玩家的评级结论。',
+      '6. 玩家数据中 champion 为 null 表示英雄数据缺失，跳过英雄相关分析；显示“数据不足”表示无战绩数据，跳过战绩相关分析。'
+    ].join('\n')
+  }
+
+  const dimensionLine = isBasic
+    ? '3. Ground every conclusion in five dimensions: champion playstyle (role, power spikes, tempo), player style (recent results, most-played champions), rank and win rate, and threat score.'
+    : '3. Ground every conclusion in five dimensions: champion playstyle (role, power spikes, tempo), player style (recent results, most-played champions), position, rank and win rate, and threat score.'
+  const focusLine = isBasic
+    ? '4. Focus on threat distribution (how to answer the top threat) and gameplan advice.'
+    : '4. Focus on threat distribution (how to answer the top threat), matchup responses against our lineup (how to play against my lane opponent, roughly what level the enemy jungler will gank at), and gameplan advice.'
+
+  const introLine = isBasic
+    ? 'You are a League of Legends early-game situation analyst. The user is in an ARAM match and will receive situation-read data for the five players on the enemy team ("the enemy") below, plus an ally lineup reference (names and champions only). Write an enemy brief that helps the user ("me") know who to avoid from the start.'
+    : 'You are a League of Legends early-game situation analyst. The user is in a match and will receive situation-read data for the five players on the enemy team ("the enemy") below, plus an ally lineup reference (names, positions and champions only, for matchup advice). Write an enemy brief that helps the user ("me") know who to play around and where to focus resources from the start.'
+
+  return [
+    introLine,
+    '',
+    '[Background]',
+    "- Threat score: a local assessment of a player's overall strength, 0–10; the higher the score, the more likely the player swings the game.",
+    '- Akari score: a recent-form rating with a maximum of about 16.67; higher means better recent form. It does not include rank.',
+    '',
+    `[Threat score standard · ${modeLabel}]`,
+    getScoringStandardSection(language, queueKind),
+    '',
+    '[Output requirements]',
+    '1. Write in English.',
+    '2. Produce 3–5 overarching analytical takeaways with gameplay advice; do not list players one by one (per-player data is already visible in the app).',
+    dimensionLine,
+    focusLine,
+    '5. Conclusive judgements (such as the enemy top threat) must follow the threat scores given in the data — you must not establish your own rankings; do not re-evaluate or output ratings for players on our team.',
+    '6. A null champion means champion data is missing — skip champion-specific analysis for them; "insufficient data" means no match history — skip performance analysis for them.'
+  ].join('\n')
+}
+
+function buildEnemyUserPayload(language: AiBriefLanguage, input: EnemyBriefInput) {
+  const isBasic = input.modeTier === 'basic'
+
+  return {
+    mode: getModeLabel(language, input),
+    self: serializeSelf(language, input.self, input.championNames, isBasic),
+    players: input.players.map((player) =>
+      serializePlayer(language, player, input.championNames, isBasic)
+    ),
+    allies: input.allyPlayers.map((ally) => {
+      const record: Record<string, unknown> = {
+        name: ally.name
+      }
+
+      if (!isBasic) {
+        record.position = getPositionLabel(language, ally.position)
+      }
+
+      record.champion = getChampionLabel(input.championNames, ally.championId)
+
+      return record
+    })
+  }
+}
+
+/**
+ * 构建敌方简报的提示词（system + user 消息数组）。
+ * 纯函数，无 IPC / 网络依赖；user 消息为敌方研判数据与我方阵容对照的 JSON 序列化，
+ * 外发字段与设置区隐私说明披露的清单一致，不含对我方玩家的评级数据。
+ */
+export function buildEnemyBriefMessages(input: EnemyBriefInput): AiBriefMessage[] {
+  return [
+    { role: 'system', content: getEnemySystemPrompt(input.language, input) },
+    {
+      role: 'user',
+      content: JSON.stringify(buildEnemyUserPayload(input.language, input), null, 2)
+    }
+  ]
+}
+
+/** 组装简报输入所需的对局快照（两份简报共用，主进程从既有状态收集） */
+export interface AiBriefSource {
   language: AiBriefLanguage
   /** 本局队列（来自对局阶段 gameInfo） */
   queueId: number | null
@@ -443,45 +612,134 @@ function getPlayerDisplayName(
   return summoner?.gameName || summoner?.displayName || puuid
 }
 
+/** 定位"我"所在的队伍标识；无法定位（未识别到我或我不在任何队伍）为 null */
+function resolveSelfTeamIdentifier(source: AiBriefSource): string | null {
+  if (!source.selfPuuid) {
+    return null
+  }
+
+  return (
+    Object.entries(source.teams).find(([, puuids]) => puuids.includes(source.selfPuuid!))?.[0] ??
+    null
+  )
+}
+
+/** "我"的位置与英雄上下文（两份简报共用） */
+function resolveSelfContext(source: AiBriefSource): {
+  position: string | null
+  championId: number | null
+} {
+  const selfPuuid = source.selfPuuid
+
+  return {
+    position: normalizePosition(selfPuuid ? source.positionAssignments[selfPuuid] : undefined),
+    championId: (selfPuuid ? source.championSelections[selfPuuid] : undefined) || null
+  }
+}
+
 /**
- * 从对局快照组装我方简报输入：定位我方队伍、昵称回退、按队列取本局相关段位、
- * 威胁分与近期表现取数、特征标签与预组队关系。纯函数，无 IPC / 网络依赖，
+ * 从对局快照组装单个玩家的简报输入：昵称回退、按队列取本局相关段位、
+ * 威胁分与近期表现取数、特征标签与预组队关系。
  * 字段取数与研判卡同源（威胁分排行、selectFeatureTags、getEffectiveRankedEntry）。
- * 只序列化我所在队伍的玩家；无法定位我时不含任何玩家。
  */
-export function buildAllyBriefInput(source: AllyBriefSource): AllyBriefInput {
-  const isFlexQueueGame = isFlexQueue(source.queueId)
-  const selfTeamIdentifier = source.selfPuuid
-    ? (Object.entries(source.teams).find(([, puuids]) => puuids.includes(source.selfPuuid!))?.[0] ??
-      null)
-    : null
-  const threatScores = new Map(source.threatRankings.map((entry) => [entry.puuid, entry.score]))
-  const premadeGroupSizes = getPremadeGroupSizes(source.premadeTeamMap)
+function buildAiBriefPlayerInput(
+  source: AiBriefSource,
+  puuid: string,
+  isFlexQueueGame: boolean,
+  threatScores: Map<string, number | null>,
+  premadeGroupSizes: Map<string, number>
+): AiBriefPlayerInput {
+  const analysis = source.analysis?.[puuid] ?? null
+  const rankedStats = source.rankedStats[puuid]
+
+  return {
+    name: getPlayerDisplayName(source.summoners[puuid], puuid),
+    position: normalizePosition(source.positionAssignments[puuid]),
+    championId: source.championSelections[puuid] || null,
+    ranked: getEffectiveRankedEntry(
+      extractFlexRankedEntry(rankedStats),
+      extractSoloRankedEntry(rankedStats),
+      isFlexQueueGame
+    ),
+    threatScore: threatScores.get(puuid) ?? null,
+    recentWinRate: analysis ? analysis.summary.winRate : null,
+    recentGameCount: analysis ? analysis.count : null,
+    akariScore: analysis ? analysis.akariScore.total : null,
+    featureTags: selectFeatureTags({
+      analysis,
+      premadeGroupSize: premadeGroupSizes.get(puuid) ?? null
+    }),
+    premadeGroupId: source.premadeTeamMap[puuid] ?? null
+  }
+}
+
+/** 组装输入时共用的取数索引（威胁分 / 预组队组大小） */
+function createSourceIndexes(source: AiBriefSource) {
+  return {
+    isFlexQueueGame: isFlexQueue(source.queueId),
+    threatScores: new Map(source.threatRankings.map((entry) => [entry.puuid, entry.score])),
+    premadeGroupSizes: getPremadeGroupSizes(source.premadeTeamMap)
+  }
+}
+
+/**
+ * 从对局快照组装我方简报输入：定位我方队伍、只序列化我所在队伍的玩家。
+ * 纯函数，无 IPC / 网络依赖；无法定位我时不含任何玩家。
+ */
+export function buildAllyBriefInput(source: AiBriefSource): AllyBriefInput {
+  const selfTeamIdentifier = resolveSelfTeamIdentifier(source)
+  const { isFlexQueueGame, threatScores, premadeGroupSizes } = createSourceIndexes(source)
 
   const players: AiBriefPlayerInput[] = []
 
   for (const puuid of selfTeamIdentifier ? (source.teams[selfTeamIdentifier] ?? []) : []) {
-    const analysis = source.analysis?.[puuid] ?? null
-    const rankedStats = source.rankedStats[puuid]
+    players.push(
+      buildAiBriefPlayerInput(source, puuid, isFlexQueueGame, threatScores, premadeGroupSizes)
+    )
+  }
 
-    players.push({
+  return {
+    language: source.language,
+    queueId: source.queueId,
+    modeTier: source.modeTier,
+    self: resolveSelfContext(source),
+    championNames: source.championNames,
+    players
+  }
+}
+
+/**
+ * 从对局快照组装敌方简报输入：敌方玩家取我所在队伍之外的队伍，
+ * 我方阵容对照只保留昵称 / 位置 / 本局英雄。纯函数，无 IPC / 网络依赖；
+ * 敌方英雄缺失（championSelections 无条目）时该玩家英雄字段为 null，
+ * 由提示词指示跳过英雄维度；无法定位我时不含任何玩家。
+ */
+export function buildEnemyBriefInput(source: AiBriefSource): EnemyBriefInput {
+  const selfTeamIdentifier = resolveSelfTeamIdentifier(source)
+  const { isFlexQueueGame, threatScores, premadeGroupSizes } = createSourceIndexes(source)
+
+  const players: AiBriefPlayerInput[] = []
+  if (selfTeamIdentifier) {
+    for (const [teamIdentifier, puuids] of Object.entries(source.teams)) {
+      if (teamIdentifier === selfTeamIdentifier) {
+        continue
+      }
+
+      for (const puuid of puuids) {
+        players.push(
+          buildAiBriefPlayerInput(source, puuid, isFlexQueueGame, threatScores, premadeGroupSizes)
+        )
+      }
+    }
+  }
+
+  const allyPlayers: EnemyBriefAllyReference[] = []
+
+  for (const puuid of selfTeamIdentifier ? (source.teams[selfTeamIdentifier] ?? []) : []) {
+    allyPlayers.push({
       name: getPlayerDisplayName(source.summoners[puuid], puuid),
       position: normalizePosition(source.positionAssignments[puuid]),
-      championId: source.championSelections[puuid] || null,
-      ranked: getEffectiveRankedEntry(
-        extractFlexRankedEntry(rankedStats),
-        extractSoloRankedEntry(rankedStats),
-        isFlexQueueGame
-      ),
-      threatScore: threatScores.get(puuid) ?? null,
-      recentWinRate: analysis ? analysis.summary.winRate : null,
-      recentGameCount: analysis ? analysis.count : null,
-      akariScore: analysis ? analysis.akariScore.total : null,
-      featureTags: selectFeatureTags({
-        analysis,
-        premadeGroupSize: premadeGroupSizes.get(puuid) ?? null
-      }),
-      premadeGroupId: source.premadeTeamMap[puuid] ?? null
+      championId: source.championSelections[puuid] || null
     })
   }
 
@@ -489,14 +747,9 @@ export function buildAllyBriefInput(source: AllyBriefSource): AllyBriefInput {
     language: source.language,
     queueId: source.queueId,
     modeTier: source.modeTier,
-    self: {
-      position: normalizePosition(
-        source.selfPuuid ? source.positionAssignments[source.selfPuuid] : undefined
-      ),
-      championId:
-        (source.selfPuuid ? source.championSelections[source.selfPuuid] : undefined) || null
-    },
+    self: resolveSelfContext(source),
     championNames: source.championNames,
-    players
+    players,
+    allyPlayers
   }
 }

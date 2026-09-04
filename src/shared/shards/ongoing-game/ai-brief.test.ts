@@ -5,10 +5,13 @@ import { describe, expect, it } from 'vitest'
 import {
   AI_BRIEF_RETRY_DELAYS_MS,
   type AiBriefPlayerInput,
+  type AiBriefSource,
   type AllyBriefInput,
-  type AllyBriefSource,
+  type EnemyBriefInput,
   buildAllyBriefInput,
   buildAllyBriefMessages,
+  buildEnemyBriefInput,
+  buildEnemyBriefMessages,
   getAiBriefLanguage
 } from './ai-brief'
 
@@ -372,7 +375,7 @@ function createRankedFixture(options: {
   } as unknown as RankedStats
 }
 
-function createSource(overrides: Partial<AllyBriefSource> = {}): AllyBriefSource {
+function createSource(overrides: Partial<AiBriefSource> = {}): AiBriefSource {
   return {
     language: 'zh-CN',
     queueId: 420,
@@ -540,6 +543,307 @@ describe('buildAllyBriefInput', () => {
 
   it('feeds the assembled input straight into the message builder', () => {
     const messages = buildAllyBriefMessages(buildAllyBriefInput(createSource()))
+
+    expect(messages.map((message) => message.role)).toEqual(['system', 'user'])
+    expect(() => JSON.parse(messages[1].content)).not.toThrow()
+  })
+})
+
+function createEnemyInput(overrides: Partial<EnemyBriefInput> = {}): EnemyBriefInput {
+  return {
+    language: 'zh-CN',
+    queueId: 420,
+    modeTier: 'full',
+    self: { position: 'MIDDLE', championId: 238 },
+    championNames: { 7: '李青', 238: '阿卡丽' },
+    players: [createPlayer({ name: 'EnemyFoo' })],
+    allyPlayers: [{ name: 'AllyFoo', position: 'TOP', championId: 122 }],
+    ...overrides
+  }
+}
+
+function getEnemySystemPrompt(input: EnemyBriefInput): string {
+  return buildEnemyBriefMessages(input)[0].content
+}
+
+function getEnemyUserPayload(input: EnemyBriefInput): {
+  mode: string
+  self: Record<string, unknown>
+  players: Record<string, unknown>[]
+  allies: Record<string, unknown>[]
+} {
+  return JSON.parse(buildEnemyBriefMessages(input)[1].content)
+}
+
+describe('buildEnemyBriefMessages', () => {
+  it('builds a system message followed by a user message with parseable JSON data', () => {
+    const messages = buildEnemyBriefMessages(createEnemyInput())
+
+    expect(messages.map((message) => message.role)).toEqual(['system', 'user'])
+    expect(() => JSON.parse(messages[1].content)).not.toThrow()
+  })
+
+  it.each([
+    {
+      language: 'zh-CN' as const,
+      queueId: 420,
+      contains: ['× 2.0', '±1.5'],
+      notContains: ['× 0.30', '× 4.0']
+    },
+    {
+      language: 'en' as const,
+      queueId: 440,
+      contains: ['× 0.30', '× 4.0', '±3.5'],
+      notContains: ['× 2.0', '±1.5']
+    }
+  ])(
+    'describes the scoring standard matching queue $queueId ($language)',
+    ({ language, queueId, contains, notContains }) => {
+      const system = getEnemySystemPrompt(createEnemyInput({ language, queueId }))
+
+      for (const fragment of contains) {
+        expect(system).toContain(fragment)
+      }
+
+      for (const fragment of notContains) {
+        expect(system).not.toContain(fragment)
+      }
+    }
+  )
+
+  it.each([
+    {
+      language: 'zh-CN' as const,
+      fragments: ['3–5 条', '总纲式', '不逐人罗列']
+    },
+    {
+      language: 'en' as const,
+      fragments: ['3–5', 'overarching', 'do not list players one by one']
+    }
+  ])(
+    'requires 3-5 overarching takeaways without per-player listing ($language)',
+    ({ language, fragments }) => {
+      const system = getEnemySystemPrompt(createEnemyInput({ language }))
+
+      for (const fragment of fragments) {
+        expect(system).toContain(fragment)
+      }
+    }
+  )
+
+  it.each([
+    {
+      language: 'zh-CN' as const,
+      fragments: ['英雄玩法', '玩家风格', '位置', '段位', '威胁分', '五个维度']
+    },
+    {
+      language: 'en' as const,
+      fragments: [
+        'champion playstyle',
+        'player style',
+        'position',
+        'rank',
+        'threat score',
+        'five dimensions'
+      ]
+    }
+  ])('requires the five-dimension assessment framework ($language)', ({ language, fragments }) => {
+    const system = getEnemySystemPrompt(createEnemyInput({ language }))
+
+    for (const fragment of fragments) {
+      expect(system).toContain(fragment)
+    }
+  })
+
+  it.each([
+    {
+      language: 'zh-CN' as const,
+      fragments: ['威胁分布', '头号威胁', '对位', '我对线', '敌方打野']
+    },
+    {
+      language: 'en' as const,
+      fragments: ['threat distribution', 'top threat', 'matchup', 'lane opponent', 'enemy jungler']
+    }
+  ])(
+    'focuses on threat distribution, matchup responses and gameplan ($language)',
+    ({ language, fragments }) => {
+      const system = getEnemySystemPrompt(createEnemyInput({ language }))
+
+      for (const fragment of fragments) {
+        expect(system).toContain(fragment)
+      }
+    }
+  )
+
+  it.each([
+    {
+      language: 'zh-CN' as const,
+      fragments: ['不得另立排名', '不重新评估或输出我方玩家的评级']
+    },
+    {
+      language: 'en' as const,
+      fragments: [
+        'must not establish your own rankings',
+        'do not re-evaluate or output ratings for players on our team'
+      ]
+    }
+  ])(
+    'bans self-established rankings and re-rating the ally team ($language)',
+    ({ language, fragments }) => {
+      const system = getEnemySystemPrompt(createEnemyInput({ language }))
+
+      for (const fragment of fragments) {
+        expect(system).toContain(fragment)
+      }
+    }
+  )
+
+  it.each([
+    {
+      language: 'zh-CN' as const,
+      fragments: ['champion 为 null 表示英雄数据缺失', '跳过英雄相关分析']
+    },
+    {
+      language: 'en' as const,
+      fragments: [
+        'A null champion means champion data is missing',
+        'skip champion-specific analysis'
+      ]
+    }
+  ])(
+    'skips the champion dimension for players with missing champion data ($language)',
+    ({ language, fragments }) => {
+      const system = getEnemySystemPrompt(createEnemyInput({ language }))
+
+      for (const fragment of fragments) {
+        expect(system).toContain(fragment)
+      }
+    }
+  )
+
+  it.each([
+    { language: 'zh-CN' as const, forbidden: ['位置', '对位'] },
+    { language: 'en' as const, forbidden: ['position', 'matchup'] }
+  ])(
+    'basic mode drops position fields and the matchup guidance ($language)',
+    ({ language, forbidden }) => {
+      const input = createEnemyInput({ language, queueId: 450, modeTier: 'basic' })
+      const messages = buildEnemyBriefMessages(input)
+      const payload = getEnemyUserPayload(input)
+
+      expect(payload.self).not.toHaveProperty('position')
+      expect(payload.players[0]).not.toHaveProperty('position')
+      expect(payload.allies[0]).not.toHaveProperty('position')
+
+      for (const fragment of forbidden) {
+        expect(messages[0].content).not.toContain(fragment)
+      }
+
+      const fullMessages = buildEnemyBriefMessages(createEnemyInput({ language }))
+      expect(JSON.parse(fullMessages[1].content).allies[0]).toHaveProperty('position')
+
+      for (const fragment of forbidden) {
+        expect(fullMessages[0].content).toContain(fragment)
+      }
+    }
+  )
+
+  it.each([
+    { language: 'zh-CN' as const, fragment: '简体中文', mode: '单双排位' },
+    { language: 'en' as const, fragment: 'English', mode: 'Ranked Solo/Duo' }
+  ])('requires output in the target language ($language)', ({ language, fragment, mode }) => {
+    const system = getEnemySystemPrompt(createEnemyInput({ language }))
+
+    expect(system).toContain(fragment)
+    expect(getEnemyUserPayload(createEnemyInput({ language })).mode).toBe(mode)
+  })
+
+  it('serializes exactly the privacy-disclosed fields', () => {
+    const payload = getEnemyUserPayload(
+      createEnemyInput({
+        players: [createPlayer({ premadeGroupId: 2 })]
+      })
+    )
+
+    expect(Object.keys(payload).sort()).toEqual(['allies', 'mode', 'players', 'self'])
+    expect(Object.keys(payload.self).sort()).toEqual(['champion', 'position'])
+    expect(Object.keys(payload.players[0]).sort()).toEqual([
+      'akariScore',
+      'champion',
+      'featureTags',
+      'name',
+      'position',
+      'premadeGroup',
+      'rank',
+      'recentGameCount',
+      'recentWinRate',
+      'threatScore'
+    ])
+    // 我方阵容对照只含定位对位关系所需字段，不含任何评级数据
+    expect(Object.keys(payload.allies[0]).sort()).toEqual(['champion', 'name', 'position'])
+  })
+
+  it('leaves missing enemy champion fields empty instead of dropping the player', () => {
+    const payload = getEnemyUserPayload(
+      createEnemyInput({
+        players: [createPlayer({ championId: null })]
+      })
+    )
+
+    expect(payload.players).toHaveLength(1)
+    expect(payload.players[0].champion).toBeNull()
+  })
+})
+
+describe('buildEnemyBriefInput', () => {
+  it('only includes enemy players in players and ally references in the matchup context', () => {
+    const input = buildEnemyBriefInput(createSource())
+
+    expect(input.players.map((player) => player.name)).toEqual(['EnemyDisplay'])
+    expect(input.allyPlayers).toEqual([
+      { name: 'SelfName', position: 'MIDDLE', championId: 238 },
+      { name: 'AllyDisplay', position: null, championId: null }
+    ])
+    expect(JSON.stringify(input.allyPlayers)).not.toContain('threatScore')
+  })
+
+  it('maps ongoing-game state data onto enemy prompt player inputs', () => {
+    const input = buildEnemyBriefInput(createSource())
+    const enemy = input.players[0]
+
+    expect(input.language).toBe('zh-CN')
+    expect(input.queueId).toBe(420)
+    expect(input.modeTier).toBe('full')
+    expect(input.self).toEqual({ position: 'MIDDLE', championId: 238 })
+    expect(enemy).toMatchObject({
+      position: 'MIDDLE',
+      championId: 7,
+      ranked: { tier: 'GOLD', division: 'II' },
+      threatScore: 6.2,
+      recentWinRate: 0.4,
+      recentGameCount: 18,
+      akariScore: 5.1,
+      premadeGroupId: null
+    })
+    expect(enemy.featureTags).toContainEqual({ type: 'losing-streak', count: 4 })
+  })
+
+  it('keeps generating with a null champion when the enemy champion data is missing', () => {
+    const input = buildEnemyBriefInput(createSource({ championSelections: { self: 238 } }))
+
+    expect(input.players).toHaveLength(1)
+    expect(input.players[0].championId).toBeNull()
+  })
+
+  it('returns no players when the self player cannot be located in any team', () => {
+    const input = buildEnemyBriefInput(createSource({ selfPuuid: null }))
+
+    expect(input.players).toEqual([])
+    expect(input.allyPlayers).toEqual([])
+  })
+
+  it('feeds the assembled input straight into the message builder', () => {
+    const messages = buildEnemyBriefMessages(buildEnemyBriefInput(createSource()))
 
     expect(messages.map((message) => message.role)).toEqual(['system', 'user'])
     expect(() => JSON.parse(messages[1].content)).not.toThrow()

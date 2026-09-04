@@ -301,6 +301,12 @@ ongoingGame:
       errorConfig: 'Ally brief failed: invalid API key. No more attempts this game'
       errorNetwork: 'Ally brief failed: network error. No more attempts this game'
       errorTimeout: 'Ally brief failed: request timed out. No more attempts this game'
+    enemyBrief:
+      title: Enemy Brief
+      loading: Generating the enemy brief...
+      errorConfig: 'Enemy brief failed: invalid API key. No more attempts this game'
+      errorNetwork: 'Enemy brief failed: network error. No more attempts this game'
+      errorTimeout: 'Enemy brief failed: request timed out. No more attempts this game'
     secondaryThreat: 'Secondary threat: {{name}} ({{score}})'
     secondaryCarry: 'Secondary carry: {{name}} ({{score}})'
     basisRecentWithRank_one: '{{rank}} · {{winRate}}% WR in {{count}} recent game'
