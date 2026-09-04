@@ -9,6 +9,7 @@ import {
 } from '@shared/shards/ongoing-game'
 
 import { AiBriefExecutor } from './ai-brief-executor'
+import { isChampSelectFinalized } from './champ-select-members'
 import type { OngoingGameMainContext } from './context'
 
 /**
@@ -16,6 +17,10 @@ import type { OngoingGameMainContext } from './context'
  * （研判状态就绪 + 已配置 API Key），只评我方 5 人；敌方简报仅在游戏内阶段触发
  * （研判状态就绪 + 已配置 API Key，每局 1 次），评敌方 5 人并对照我方阵容。
  * 大厅、排队、观战等非对局阶段零请求。
+ * 我方简报的信息完整性补全：首版生成后，我方 5 人全部锁定英雄且锁定集合与首版输入
+ * 不同时自动重新生成一次（新版本含英雄玩法维度的完整评估）；首版生成时已全员锁定
+ * 或锁定后英雄与首版一致则不额外生成。每局硬上限 2 次生成（首版 + 锁定后更新一次），
+ * 后续英雄变化不再触发，计费可预期。
  * EOG 或离开对局阶段（含选人秒退回大厅）时清空两份简报状态与"本局已尝试"标志，
  * 下一局从零开始；进入游戏阶段不清空（两份简报在对局中都可查看）。
  * 两份各自持有独立生成单元：我方简报终态失败不阻断敌方简报生成，
@@ -27,6 +32,10 @@ export class OngoingGameAiBriefController {
   private _allyAttemptedThisGame = false
   /** 敌方简报本局是否已发起过生成（含重试），每局 1 次 */
   private _enemyAttemptedThisGame = false
+  /** 我方简报首版生成时刻的英雄输入（稳定序列化），锁定后与之比较判定是否需要更新 */
+  private _allyFirstInputSelectionsKey: string | null = null
+  /** 锁定后更新是否已发起：每局硬上限 2 次生成（首版 1 次 + 更新 1 次） */
+  private _allyUpdateAttemptedThisGame = false
 
   private readonly _allyExecutor: AiBriefExecutor
   private readonly _enemyExecutor: AiBriefExecutor
@@ -77,8 +86,27 @@ export class OngoingGameAiBriefController {
       (isReady) => {
         if (isReady && !this._allyAttemptedThisGame) {
           this._allyAttemptedThisGame = true
+          this._allyFirstInputSelectionsKey = this._serializeAllySelections()
           this._allyExecutor.start()
         }
+      }
+    )
+
+    // 我方 5 人全员锁定后：锁定集合与首版输入不同则重新生成一次（每局至多一次更新）
+    mobxUtils.reaction(
+      () => this._getLockedAllySelectionsKey(),
+      (lockedSelectionsKey) => {
+        if (
+          !lockedSelectionsKey ||
+          !this._allyFirstInputSelectionsKey ||
+          this._allyUpdateAttemptedThisGame ||
+          lockedSelectionsKey === this._allyFirstInputSelectionsKey
+        ) {
+          return
+        }
+
+        this._allyUpdateAttemptedThisGame = true
+        this._allyExecutor.start()
       }
     )
 
@@ -116,10 +144,64 @@ export class OngoingGameAiBriefController {
     return phase === 'champ-select' || phase === 'in-game'
   }
 
+  /**
+   * 我方 5 人全员锁定后的英雄集合（puuid → championId 的稳定序列化）：
+   * 选人进入确认阶段（FINALIZATION / GAME_STARTING）且每名我方成员都有锁定英雄时
+   * 返回序列化键，否则返回 null。悬停未锁定不计入。
+   */
+  private _getLockedAllySelectionsKey(): string | null {
+    const { state, leagueClient } = this._context
+
+    if (!this._allyAttemptedThisGame || this._allyUpdateAttemptedThisGame) {
+      return null
+    }
+
+    if (state.queryStage.phase !== 'champ-select') {
+      return null
+    }
+
+    const session = leagueClient.data.champSelect.session
+    if (!session || !isChampSelectFinalized(session)) {
+      return null
+    }
+
+    const entries = this._collectAllySelectionEntries()
+    if (!entries || entries.some(([, championId]) => !championId)) {
+      return null
+    }
+
+    return JSON.stringify(entries)
+  }
+
+  /** 首版生成时刻的我方英雄集合序列化（与锁定集合同构，供比较） */
+  private _serializeAllySelections(): string | null {
+    const entries = this._collectAllySelectionEntries()
+    return entries ? JSON.stringify(entries) : null
+  }
+
+  /** 定位我方队伍并收集 [puuid, championId]（未锁定为 0）；无法定位我时返回 null */
+  private _collectAllySelectionEntries(): [string, number][] | null {
+    const { state, leagueClient } = this._context
+    const selfPuuid = leagueClient.data.summoner.me?.puuid ?? null
+
+    if (!selfPuuid) {
+      return null
+    }
+
+    const allyPuuids = Object.values(state.teams).find((puuids) => puuids.includes(selfPuuid))
+    if (!allyPuuids) {
+      return null
+    }
+
+    return allyPuuids.map((puuid) => [puuid, state.championSelections[puuid] ?? 0])
+  }
+
   /** 离开对局（EOG / 秒退回大厅 / 断开）：作废在途请求与重试、清空两份状态、复位每局标志 */
   private _resetForNextGame() {
     this._allyAttemptedThisGame = false
     this._enemyAttemptedThisGame = false
+    this._allyFirstInputSelectionsKey = null
+    this._allyUpdateAttemptedThisGame = false
     this._allyExecutor.reset()
     this._enemyExecutor.reset()
   }

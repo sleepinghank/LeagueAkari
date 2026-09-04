@@ -39,8 +39,19 @@ export class AiBriefExecutor {
 
   constructor(private readonly _options: AiBriefExecutorOptions) {}
 
-  /** 发起一次生成（loading → 请求 → 成功 / 重试 / 终态错误） */
+  /**
+   * 发起一次生成（loading → 请求 → 成功 / 重试 / 终态错误）。
+   * 同一份简报一局内可能再次 start（如我方简报锁定后更新）：递增代次作废上一次
+   * 在途请求与排队中的重试，避免迟到的旧响应覆盖新版本。
+   */
   start() {
+    this._generationToken += 1
+
+    if (this._retryTimer) {
+      clearTimeout(this._retryTimer)
+      this._retryTimer = null
+    }
+
     this._failureCount = 0
     this._options.setStatus({ status: 'loading' })
     void this._request()
