@@ -14,10 +14,10 @@ import type {
   SituationRead
 } from '@shared/shards/ongoing-game'
 import {
-  AI_SITUATION_BRIEF_DEFAULT_BASE_URL,
-  AI_SITUATION_BRIEF_DEFAULT_MODEL,
-  type AiSituationBriefStatus
-} from '@shared/shards/ongoing-game/ai-situation-brief'
+  AI_BRIEF_DEFAULT_BASE_URL,
+  AI_BRIEF_DEFAULT_MODEL,
+  type AiBriefStatus
+} from '@shared/shards/ongoing-game/ai-brief'
 import { createDefaultOngoingGamePanelPlayerCardTagSettings } from '@shared/shards/ongoing-game/settings'
 import type { SavedInfo } from '@shared/shards/saved-player'
 import type { RankedStats } from '@shared/types/league-client/ranked'
@@ -85,19 +85,19 @@ export class OngoingGameSettings implements OngoingGameSettingsData {
   premadeTeamInferMatchCountThreshold: number = 5
 
   /**
-   * AI 研判总结：DeepSeek API Key，空为默认态（功能关闭），明文存于本地设置文件
+   * AI 简报：DeepSeek API Key，空为默认态（功能关闭），明文存于本地设置文件
    */
   aiSituationBriefApiKey: string = ''
 
   /**
-   * AI 研判总结：OpenAI 兼容 Base URL，空白时使用官方端点
+   * AI 简报：OpenAI 兼容 Base URL，空白时使用官方端点
    */
-  aiSituationBriefBaseUrl: string = AI_SITUATION_BRIEF_DEFAULT_BASE_URL
+  aiSituationBriefBaseUrl: string = AI_BRIEF_DEFAULT_BASE_URL
 
   /**
-   * AI 研判总结：模型名
+   * AI 简报：模型名
    */
-  aiSituationBriefModel: string = AI_SITUATION_BRIEF_DEFAULT_MODEL
+  aiSituationBriefModel: string = AI_BRIEF_DEFAULT_MODEL
 
   setAiSituationBriefApiKey(value: string) {
     this.aiSituationBriefApiKey = value
@@ -260,11 +260,18 @@ export class OngoingGameState {
     this.situationRead = value
   }
 
-  /** AI 研判总结状态：加载中 / 成功 / 终态失败；未配置 key 或研判卡未出现为 null */
-  aiSituationBrief: AiSituationBriefStatus | null = null
+  /** 我方简报状态（选人阶段生成）：加载中 / 成功 / 终态失败；未配置 key 或不在对局为 null */
+  allyBrief: AiBriefStatus | null = null
 
-  setAiSituationBrief(value: AiSituationBriefStatus | null) {
-    this.aiSituationBrief = value
+  setAllyBrief(value: AiBriefStatus | null) {
+    this.allyBrief = value
+  }
+
+  /** 敌方简报状态（进入游戏后生成，两份同构三态）：本阶段未触发时为 null */
+  enemyBrief: AiBriefStatus | null = null
+
+  setEnemyBrief(value: AiBriefStatus | null) {
+    this.enemyBrief = value
   }
 
   matchHistoryTagParams: Pick<MatchHistoryQueryParams, 'tag' | 'tagsQueryType'> = {}
@@ -317,7 +324,8 @@ export class OngoingGameState {
   clear(options?: { keepTagParams?: boolean; keepAdditionalInfo?: boolean }) {
     this.analysis = null
     this.situationRead = null
-    this.aiSituationBrief = null
+    this.allyBrief = null
+    this.enemyBrief = null
     this.matchHistory = {}
     this.summoner = {}
     this.savedInfo = {}
@@ -442,7 +450,8 @@ export class OngoingGameState {
       teams: computedStruct,
       analysis: observableStruct,
       situationRead: observableStruct,
-      aiSituationBrief: observableStruct,
+      allyBrief: observableStruct,
+      enemyBrief: observableStruct,
       queryStage: computedStruct,
       teamParticipantGroups: computedStruct,
       draft: observableStruct,

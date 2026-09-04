@@ -12,10 +12,10 @@ import type {
   SituationRead
 } from '@shared/shards/ongoing-game'
 import {
-  AI_SITUATION_BRIEF_DEFAULT_BASE_URL,
-  AI_SITUATION_BRIEF_DEFAULT_MODEL,
-  type AiSituationBriefStatus
-} from '@shared/shards/ongoing-game/ai-situation-brief'
+  AI_BRIEF_DEFAULT_BASE_URL,
+  AI_BRIEF_DEFAULT_MODEL,
+  type AiBriefStatus
+} from '@shared/shards/ongoing-game/ai-brief'
 import { createDefaultOngoingGamePanelPlayerCardTagSettings } from '@shared/shards/ongoing-game/settings'
 import type { SavedInfo } from '@shared/shards/saved-player'
 import type { RankedStats } from '@shared/types/league-client/ranked'
@@ -49,8 +49,8 @@ export const useOngoingGameStore = defineStore('shard:ongoing-game-renderer', ()
     queryInLobbyPhase: true,
 
     aiSituationBriefApiKey: '',
-    aiSituationBriefBaseUrl: AI_SITUATION_BRIEF_DEFAULT_BASE_URL,
-    aiSituationBriefModel: AI_SITUATION_BRIEF_DEFAULT_MODEL
+    aiSituationBriefBaseUrl: AI_BRIEF_DEFAULT_BASE_URL,
+    aiSituationBriefModel: AI_BRIEF_DEFAULT_MODEL
   })
 
   const championSelections = shallowRef<Record<string, number>>({})
@@ -68,7 +68,8 @@ export const useOngoingGameStore = defineStore('shard:ongoing-game-renderer', ()
 
   const situationRead = shallowRef<SituationRead | null>(null)
 
-  const aiSituationBrief = shallowRef<AiSituationBriefStatus | null>(null)
+  const allyBrief = shallowRef<AiBriefStatus | null>(null)
+  const enemyBrief = shallowRef<AiBriefStatus | null>(null)
 
   const matchHistoryTagParams = shallowRef<Pick<MatchHistoryQueryParams, 'tag' | 'tagsQueryType'>>(
     {}
@@ -113,7 +114,8 @@ export const useOngoingGameStore = defineStore('shard:ongoing-game-renderer', ()
     isInEog,
     analysis,
     situationRead,
-    aiSituationBrief,
+    allyBrief,
+    enemyBrief,
     matchHistoryTagParams,
 
     matchHistory,

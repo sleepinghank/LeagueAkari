@@ -47,11 +47,11 @@ export interface OngoingGameSettingsData extends OngoingGamePanelSettings {
   autoRouteWhenGameStarts: boolean
   queryInLobbyPhase: boolean
   premadeTeamInferMatchCountThreshold: number
-  /** AI 研判总结：DeepSeek API Key（明文存于本地设置文件）；空为默认态，即功能关闭 */
+  /** AI 简报：DeepSeek API Key（明文存于本地设置文件）；空为默认态，即功能关闭 */
   aiSituationBriefApiKey: string
-  /** AI 研判总结：OpenAI 兼容 Base URL，默认官方端点，可填中转 */
+  /** AI 简报：OpenAI 兼容 Base URL，默认官方端点，可填中转 */
   aiSituationBriefBaseUrl: string
-  /** AI 研判总结：模型名，默认 deepseek-chat */
+  /** AI 简报：模型名，默认 deepseek-chat */
   aiSituationBriefModel: string
 }
 

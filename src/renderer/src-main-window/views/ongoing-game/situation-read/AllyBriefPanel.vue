@@ -1,10 +1,10 @@
 <template>
   <div
     class="flex shrink-0 flex-col border-b border-black/10 dark:border-white/10"
-    :style="{ height: `${AI_SITUATION_BRIEF_PANEL_HEIGHT_PX}px` }"
+    :style="{ height: `${ALLY_BRIEF_PANEL_HEIGHT_PX}px` }"
   >
     <div class="flex shrink-0 items-center px-4 pt-2">
-      <span class="text-sm font-bold">{{ t('ongoingGame.situationRead.aiBrief.title') }}</span>
+      <span class="text-sm font-bold">{{ t('ongoingGame.situationRead.allyBrief.title') }}</span>
     </div>
 
     <div
@@ -13,7 +13,7 @@
     >
       <NSpin :size="14" />
       <span class="text-xs text-black/50 dark:text-white/50">
-        {{ t('ongoingGame.situationRead.aiBrief.loading') }}
+        {{ t('ongoingGame.situationRead.allyBrief.loading') }}
       </span>
     </div>
 
@@ -33,7 +33,7 @@
 
 <script lang="ts">
 /** 面板整体高度：研判卡下方的固定预留（内容超长时在内部滚动） */
-export const AI_SITUATION_BRIEF_PANEL_HEIGHT_PX = 260
+export const ALLY_BRIEF_PANEL_HEIGHT_PX = 260
 </script>
 
 <script setup lang="ts">
@@ -47,7 +47,7 @@ const { t } = useTranslation()
 
 const ongoingGameStore = useOngoingGameStore()
 
-const brief = computed(() => ongoingGameStore.aiSituationBrief)
+const brief = computed(() => ongoingGameStore.allyBrief)
 
 /** AI 输出为不可信外部内容，Markdown 渲染禁用内联 HTML */
 const markdownHtml = computed(() => {
@@ -60,11 +60,11 @@ const errorText = computed(() => {
 
   switch (errorType) {
     case 'config':
-      return t('ongoingGame.situationRead.aiBrief.errorConfig')
+      return t('ongoingGame.situationRead.allyBrief.errorConfig')
     case 'timeout':
-      return t('ongoingGame.situationRead.aiBrief.errorTimeout')
+      return t('ongoingGame.situationRead.allyBrief.errorTimeout')
     default:
-      return t('ongoingGame.situationRead.aiBrief.errorNetwork')
+      return t('ongoingGame.situationRead.allyBrief.errorNetwork')
   }
 })
 </script>

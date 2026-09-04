@@ -3,21 +3,18 @@ import type { RankedStats } from '@shared/types/league-client/ranked'
 import { describe, expect, it } from 'vitest'
 
 import {
-  AI_SITUATION_BRIEF_RETRY_DELAYS_MS,
-  type AiSituationBriefInput,
-  type AiSituationBriefPlayerInput,
-  type AiSituationBriefSource,
-  buildAiSituationBriefInput,
-  buildAiSituationBriefMessages,
-  getAiSituationBriefLanguage
-} from './ai-situation-brief'
+  AI_BRIEF_RETRY_DELAYS_MS,
+  type AiBriefPlayerInput,
+  type AllyBriefInput,
+  type AllyBriefSource,
+  buildAllyBriefInput,
+  buildAllyBriefMessages,
+  getAiBriefLanguage
+} from './ai-brief'
 
-function createPlayer(
-  overrides: Partial<AiSituationBriefPlayerInput> = {}
-): AiSituationBriefPlayerInput {
+function createPlayer(overrides: Partial<AiBriefPlayerInput> = {}): AiBriefPlayerInput {
   return {
     name: 'Foo',
-    isAlly: false,
     position: 'MIDDLE',
     championId: 7,
     ranked: { tier: 'GOLD', division: 'II' },
@@ -31,7 +28,7 @@ function createPlayer(
   }
 }
 
-function createInput(overrides: Partial<AiSituationBriefInput> = {}): AiSituationBriefInput {
+function createInput(overrides: Partial<AllyBriefInput> = {}): AllyBriefInput {
   return {
     language: 'zh-CN',
     queueId: 420,
@@ -43,21 +40,21 @@ function createInput(overrides: Partial<AiSituationBriefInput> = {}): AiSituatio
   }
 }
 
-function getSystemPrompt(input: AiSituationBriefInput): string {
-  return buildAiSituationBriefMessages(input)[0].content
+function getSystemPrompt(input: AllyBriefInput): string {
+  return buildAllyBriefMessages(input)[0].content
 }
 
-function getUserPayload(input: AiSituationBriefInput): {
+function getUserPayload(input: AllyBriefInput): {
   mode: string
   self: Record<string, unknown>
   players: Record<string, unknown>[]
 } {
-  return JSON.parse(buildAiSituationBriefMessages(input)[1].content)
+  return JSON.parse(buildAllyBriefMessages(input)[1].content)
 }
 
-describe('buildAiSituationBriefMessages', () => {
+describe('buildAllyBriefMessages', () => {
   it('builds a system message followed by a user message with parseable JSON data', () => {
-    const messages = buildAiSituationBriefMessages(createInput())
+    const messages = buildAllyBriefMessages(createInput())
 
     expect(messages.map((message) => message.role)).toEqual(['system', 'user'])
     expect(() => JSON.parse(messages[1].content)).not.toThrow()
@@ -129,12 +126,84 @@ describe('buildAiSituationBriefMessages', () => {
   )
 
   it.each([
-    { language: 'zh-CN' as const, forbidden: ['对线', '打野'] },
-    { language: 'en' as const, forbidden: ['lane against', 'jungler'] }
+    {
+      language: 'zh-CN' as const,
+      fragments: ['3–5 条', '总纲式', '不逐人罗列']
+    },
+    {
+      language: 'en' as const,
+      fragments: ['3–5', 'overarching', 'do not list players one by one']
+    }
   ])(
-    'basic mode drops position fields and matchup/jungle guidance ($language)',
+    'requires 3-5 overarching takeaways without per-player listing ($language)',
+    ({ language, fragments }) => {
+      const system = getSystemPrompt(createInput({ language }))
+
+      for (const fragment of fragments) {
+        expect(system).toContain(fragment)
+      }
+    }
+  )
+
+  it.each([
+    {
+      language: 'zh-CN' as const,
+      fragments: ['英雄玩法', '玩家风格', '位置', '段位', '威胁分', '五个维度']
+    },
+    {
+      language: 'en' as const,
+      fragments: [
+        'champion playstyle',
+        'player style',
+        'position',
+        'rank',
+        'threat score',
+        'five dimensions'
+      ]
+    }
+  ])('requires the five-dimension assessment framework ($language)', ({ language, fragments }) => {
+    const system = getSystemPrompt(createInput({ language }))
+
+    for (const fragment of fragments) {
+      expect(system).toContain(fragment)
+    }
+  })
+
+  it.each([
+    {
+      language: 'zh-CN' as const,
+      fragments: ['队伍实力结构', '配合预期', '本局节奏建议']
+    },
+    {
+      language: 'en' as const,
+      fragments: ['team strength structure', 'coordination expectations', 'tempo advice']
+    }
+  ])('focuses on team structure, coordination and tempo ($language)', ({ language, fragments }) => {
+    const system = getSystemPrompt(createInput({ language }))
+
+    for (const fragment of fragments) {
+      expect(system).toContain(fragment)
+    }
+  })
+
+  it.each([
+    { language: 'zh-CN' as const, fragments: ['不得另立排名'] },
+    { language: 'en' as const, fragments: ['must not establish your own rankings'] }
+  ])('includes the ranking ban ($language)', ({ language, fragments }) => {
+    const system = getSystemPrompt(createInput({ language }))
+
+    for (const fragment of fragments) {
+      expect(system).toContain(fragment)
+    }
+  })
+
+  it.each([
+    { language: 'zh-CN' as const, forbidden: ['位置'] },
+    { language: 'en' as const, forbidden: ['position'] }
+  ])(
+    'basic mode drops position fields and the position dimension ($language)',
     ({ language, forbidden }) => {
-      const messages = buildAiSituationBriefMessages(
+      const messages = buildAllyBriefMessages(
         createInput({ language, queueId: 450, modeTier: 'basic' })
       )
       const payload = getUserPayload(createInput({ language, queueId: 450, modeTier: 'basic' }))
@@ -146,7 +215,7 @@ describe('buildAiSituationBriefMessages', () => {
         expect(messages[0].content).not.toContain(fragment)
       }
 
-      const fullMessages = buildAiSituationBriefMessages(createInput({ language }))
+      const fullMessages = buildAllyBriefMessages(createInput({ language }))
       expect(JSON.parse(fullMessages[1].content).self).toHaveProperty('position')
 
       for (const fragment of forbidden) {
@@ -192,23 +261,6 @@ describe('buildAiSituationBriefMessages', () => {
   })
 
   it.each([
-    {
-      language: 'zh-CN' as const,
-      fragments: ['不得另立排名', '300–500 字', '分条']
-    },
-    {
-      language: 'en' as const,
-      fragments: ['must not establish your own rankings', '300–500', 'bullet points']
-    }
-  ])('includes the ranking ban and length constraints ($language)', ({ language, fragments }) => {
-    const system = getSystemPrompt(createInput({ language }))
-
-    for (const fragment of fragments) {
-      expect(system).toContain(fragment)
-    }
-  })
-
-  it.each([
     { language: 'zh-CN' as const, fragment: '简体中文', mode: '单双排位' },
     { language: 'en' as const, fragment: 'English', mode: 'Ranked Solo/Duo' }
   ])('requires output in the target language ($language)', ({ language, fragment, mode }) => {
@@ -218,7 +270,7 @@ describe('buildAiSituationBriefMessages', () => {
     expect(getUserPayload(createInput({ language })).mode).toBe(mode)
   })
 
-  it('serializes exactly the privacy-disclosed fields', () => {
+  it('serializes exactly the privacy-disclosed fields without a team field', () => {
     const payload = getUserPayload(
       createInput({
         players: [createPlayer({ premadeGroupId: 2 })]
@@ -237,7 +289,6 @@ describe('buildAiSituationBriefMessages', () => {
       'rank',
       'recentGameCount',
       'recentWinRate',
-      'team',
       'threatScore'
     ])
   })
@@ -272,14 +323,13 @@ describe('buildAiSituationBriefMessages', () => {
         createInput({
           language,
           championNames,
-          players: [createPlayer({ isAlly: true, premadeGroupId: 1 })]
+          players: [createPlayer({ premadeGroupId: 1 })]
         })
       )
 
       expect(payload.players[0].position).toBe(expected.position)
       expect(payload.players[0].champion).toBe(expected.champion)
       expect(payload.players[0].rank).toBe(expected.rank)
-      expect(payload.players[0].team).toBe('ally')
       expect(payload.players[0].featureTags).toEqual(expected.featureTags)
       expect(payload.players[0].premadeGroup).toBe(1)
       expect(payload.self.champion).toBe(expected.selfChampion)
@@ -322,7 +372,7 @@ function createRankedFixture(options: {
   } as unknown as RankedStats
 }
 
-function createSource(overrides: Partial<AiSituationBriefSource> = {}): AiSituationBriefSource {
+function createSource(overrides: Partial<AllyBriefSource> = {}): AllyBriefSource {
   return {
     language: 'zh-CN',
     queueId: 420,
@@ -332,7 +382,7 @@ function createSource(overrides: Partial<AiSituationBriefSource> = {}): AiSituat
     summoners: {
       self: { gameName: 'SelfName', displayName: 'SelfDisplay' },
       'ally-2': { gameName: '', displayName: 'AllyDisplay' },
-      'enemy-1': { gameName: '', displayName: '' }
+      'enemy-1': { gameName: '', displayName: 'EnemyDisplay' }
     },
     championSelections: { self: 238, 'enemy-1': 7 },
     positionAssignments: { self: 'MIDDLE', 'ally-2': 'NONE', 'enemy-1': 'MIDDLE' },
@@ -364,7 +414,7 @@ function createSource(overrides: Partial<AiSituationBriefSource> = {}): AiSituat
   }
 }
 
-describe('getAiSituationBriefLanguage', () => {
+describe('getAiBriefLanguage', () => {
   it.each([
     ['zh-CN', 'zh-CN'],
     ['zh-TW', 'zh-CN'],
@@ -374,30 +424,38 @@ describe('getAiSituationBriefLanguage', () => {
     [null, 'en'],
     [undefined, 'en']
   ])('maps locale %s to %s', (locale, expected) => {
-    expect(getAiSituationBriefLanguage(locale)).toBe(expected)
+    expect(getAiBriefLanguage(locale)).toBe(expected)
   })
 })
 
-describe('AI situation brief retry schedule', () => {
+describe('AI brief retry schedule', () => {
   it('retries twice with fixed delays of 5s and 15s', () => {
-    expect(AI_SITUATION_BRIEF_RETRY_DELAYS_MS).toEqual([5_000, 15_000])
+    expect(AI_BRIEF_RETRY_DELAYS_MS).toEqual([5_000, 15_000])
   })
 })
 
-describe('buildAiSituationBriefInput', () => {
+describe('buildAllyBriefInput', () => {
+  it('only includes players from the self team, never any enemy player', () => {
+    const input = buildAllyBriefInput(createSource())
+    const names = input.players.map((player) => player.name)
+
+    expect(names).toEqual(['SelfName', 'AllyDisplay'])
+    expect(JSON.stringify(input)).not.toContain('enemy-1')
+    expect(JSON.stringify(input)).not.toContain('EnemyDisplay')
+  })
+
   it('maps ongoing-game state data onto prompt player inputs', () => {
-    const input = buildAiSituationBriefInput(createSource())
-    const byPuuid = new Map(input.players.map((player) => [player.name, player]))
+    const input = buildAllyBriefInput(createSource())
+    const byName = new Map(input.players.map((player) => [player.name, player]))
 
     expect(input.language).toBe('zh-CN')
     expect(input.queueId).toBe(420)
     expect(input.modeTier).toBe('full')
     expect(input.self).toEqual({ position: 'MIDDLE', championId: 238 })
-    expect(input.players).toHaveLength(3)
+    expect(input.players).toHaveLength(2)
 
     // 昵称回退链：gameName → displayName → puuid
-    expect(byPuuid.get('SelfName')).toMatchObject({
-      isAlly: true,
+    expect(byName.get('SelfName')).toMatchObject({
       position: 'MIDDLE',
       championId: 238,
       ranked: { tier: 'GOLD', division: 'II' },
@@ -407,8 +465,7 @@ describe('buildAiSituationBriefInput', () => {
       akariScore: 8.2,
       premadeGroupId: 1
     })
-    expect(byPuuid.get('AllyDisplay')).toMatchObject({
-      isAlly: true,
+    expect(byName.get('AllyDisplay')).toMatchObject({
       position: null,
       championId: null,
       ranked: null,
@@ -418,22 +475,16 @@ describe('buildAiSituationBriefInput', () => {
       akariScore: null,
       premadeGroupId: 1
     })
-    expect(byPuuid.get('enemy-1')).toMatchObject({
-      isAlly: false,
-      position: 'MIDDLE',
-      championId: 7,
-      ranked: { tier: 'GOLD', division: 'II' },
-      threatScore: 6.2,
-      recentWinRate: 0.4,
-      recentGameCount: 18,
-      akariScore: 5.1,
-      premadeGroupId: null,
-      featureTags: [{ type: 'losing-streak', count: 4 }]
-    })
+  })
+
+  it('returns no players when the self player cannot be located in any team', () => {
+    const input = buildAllyBriefInput(createSource({ selfPuuid: null }))
+
+    expect(input.players).toEqual([])
   })
 
   it('derives feature tags with premade group size from the merged premade map', () => {
-    const input = buildAiSituationBriefInput(
+    const input = buildAllyBriefInput(
       createSource({
         analysis: {
           self: createAnalysisFixture({ count: 20, winRate: 0.55 }),
@@ -475,20 +526,20 @@ describe('buildAiSituationBriefInput', () => {
   ])(
     'resolves the queue-matched rank entry for queue $queueId',
     ({ queueId, solo, flex, expected }) => {
-      const input = buildAiSituationBriefInput(
+      const input = buildAllyBriefInput(
         createSource({
           queueId,
-          rankedStats: { 'enemy-1': createRankedFixture({ solo, flex }) }
+          rankedStats: { self: createRankedFixture({ solo, flex }) }
         })
       )
 
-      const enemy = input.players.find((player) => player.name === 'enemy-1')
-      expect(enemy?.ranked).toEqual(expected)
+      const self = input.players.find((player) => player.name === 'SelfName')
+      expect(self?.ranked).toEqual(expected)
     }
   )
 
   it('feeds the assembled input straight into the message builder', () => {
-    const messages = buildAiSituationBriefMessages(buildAiSituationBriefInput(createSource()))
+    const messages = buildAllyBriefMessages(buildAllyBriefInput(createSource()))
 
     expect(messages.map((message) => message.role)).toEqual(['system', 'user'])
     expect(() => JSON.parse(messages[1].content)).not.toThrow()
