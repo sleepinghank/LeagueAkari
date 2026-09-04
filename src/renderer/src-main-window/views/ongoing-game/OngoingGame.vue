@@ -13,7 +13,7 @@
       @dry-run-ongoing-game="handleDryRunOngoingGame"
     />
     <SituationReadCard v-if="hasSituationRead" @navigate="navigateToTabByPuuid" />
-    <AllyBriefPanel v-if="hasAllyBrief" />
+    <AiBriefPanel v-if="hasAiBriefPanel" />
     <MatchupReportBar v-if="hasMatchupReport" />
     <OngoingGameProvider :value="ongoingGame">
       <OngoingGamePanel
@@ -47,7 +47,8 @@ import { computed, ref, shallowRef } from 'vue'
 
 import { useMainWindowAppContext } from '@main-window/context'
 import { PlayerTabsRenderer } from '@main-window/shards/player-tabs'
-import AllyBriefPanel, { ALLY_BRIEF_PANEL_HEIGHT_PX } from './situation-read/AllyBriefPanel.vue'
+import AiBriefPanel from './situation-read/AiBriefPanel.vue'
+import { AI_BRIEF_SECTION_HEIGHT_PX } from './situation-read/AiBriefSection.vue'
 import MatchupReportBar, {
   MATCHUP_REPORT_BAR_HEIGHT_PX
 } from './situation-read/MatchupReportBar.vue'
@@ -89,16 +90,24 @@ const hasSituationRead = computed(() => {
 })
 
 /**
- * 我方简报区域仅在对局阶段（选人 / 游戏中）且已配置 API Key、状态存在时出现；
+ * 简报面板仅在对局阶段（选人 / 游戏中）且已配置 API Key、任一份状态存在时出现；
  * 大厅、排队等非对局阶段不显示，未配置 Key 时完全不出现。
+ * 面板内部上下分区：上=我方简报，下=敌方简报；敌方未生成时不渲染其分区。
  */
-const hasAllyBrief = computed(() => {
+const isInMatchPhase = computed(() => {
   const phase = ongoingGameStore.queryStage.phase
+  return phase === 'champ-select' || phase === 'in-game'
+})
 
+const isAiBriefConfigured = computed(() => {
+  return ongoingGameStore.settings.aiSituationBriefApiKey.trim() !== ''
+})
+
+const hasAiBriefPanel = computed(() => {
   return (
-    (phase === 'champ-select' || phase === 'in-game') &&
-    ongoingGameStore.settings.aiSituationBriefApiKey.trim() !== '' &&
-    ongoingGameStore.allyBrief != null
+    isInMatchPhase.value &&
+    isAiBriefConfigured.value &&
+    (ongoingGameStore.allyBrief != null || ongoingGameStore.enemyBrief != null)
   )
 })
 
@@ -116,8 +125,13 @@ const panelContentHeight = computed(() => {
       ? SITUATION_READ_CARD_HEIGHT_PX
       : SITUATION_READ_RANKING_ROW_HEIGHT_PX
   }
-  if (hasAllyBrief.value) {
-    reservedHeight += ALLY_BRIEF_PANEL_HEIGHT_PX
+  if (isInMatchPhase.value && isAiBriefConfigured.value) {
+    if (ongoingGameStore.allyBrief != null) {
+      reservedHeight += AI_BRIEF_SECTION_HEIGHT_PX
+    }
+    if (ongoingGameStore.enemyBrief != null) {
+      reservedHeight += AI_BRIEF_SECTION_HEIGHT_PX
+    }
   }
   if (hasMatchupReport.value) {
     reservedHeight += MATCHUP_REPORT_BAR_HEIGHT_PX
