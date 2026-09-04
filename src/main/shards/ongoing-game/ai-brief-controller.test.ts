@@ -117,6 +117,11 @@ function enterChampSelect(state: ReturnType<typeof createContext>['state']) {
   state.situationRead = createSituationRead()
 }
 
+/** 进入游戏内阶段（研判沿用当前状态） */
+function enterInGame(state: ReturnType<typeof createContext>['state']) {
+  state.queryStage = createQueryStage('in-game')
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
   mockedRequest.mockReset()
@@ -239,8 +244,10 @@ describe('OngoingGameAiBriefController ally brief generation', () => {
     state.queryStage = createQueryStage('in-game')
     drive(reactions)
 
+    // 我方简报保持不变；进入游戏触发的这一次新调用属于敌方简报
     expect(state.allyBrief).toEqual({ status: 'success', content: '我方简报内容' })
-    expect(mockedRequest).toHaveBeenCalledTimes(1)
+    expect(mockedRequest).toHaveBeenCalledTimes(2)
+    expect(state.enemyBrief).toEqual({ status: 'loading' })
   })
 })
 
@@ -287,5 +294,159 @@ describe('OngoingGameAiBriefController game boundary resets', () => {
 
     expect(mockedRequest).toHaveBeenCalledTimes(2)
     expect(state.allyBrief).toEqual({ status: 'loading' })
+  })
+})
+
+describe('OngoingGameAiBriefController enemy brief generation', () => {
+  it('does not generate the enemy brief during champ-select', () => {
+    const { context, state, reactions } = createContext()
+    new OngoingGameAiBriefController(context).watch()
+    mockedRequest.mockResolvedValue('简报内容')
+
+    enterChampSelect(state)
+    drive(reactions)
+
+    expect(mockedRequest).toHaveBeenCalledTimes(1)
+    expect(state.enemyBrief).toBeNull()
+  })
+
+  it('generates the enemy brief in the in-game phase with the five enemy players and the ally lineup', async () => {
+    const { context, state, reactions } = createContext()
+    new OngoingGameAiBriefController(context).watch()
+    mockedRequest.mockResolvedValue('敌方简报内容')
+
+    enterChampSelect(state)
+    drive(reactions)
+    await vi.waitFor(() => {
+      expect(state.allyBrief).toEqual({ status: 'success', content: '敌方简报内容' })
+    })
+
+    enterInGame(state)
+    drive(reactions)
+
+    expect(mockedRequest).toHaveBeenCalledTimes(2)
+    expect(state.enemyBrief).toEqual({ status: 'loading' })
+
+    await vi.waitFor(() => {
+      expect(state.enemyBrief).toEqual({ status: 'success', content: '敌方简报内容' })
+    })
+
+    const messages = mockedRequest.mock.calls[1][0].messages
+    const payload = JSON.parse(messages[1].content)
+
+    expect(payload.players).toHaveLength(5)
+    expect(payload.players.map((player: { name: string }) => player.name)).toEqual(
+      ENEMY_PUUIDS.map((puuid) => `name-${puuid}`)
+    )
+    expect(payload.allies).toHaveLength(5)
+    expect(payload.allies.map((ally: { name: string }) => ally.name)).toEqual(
+      ALLY_PUUIDS.map((puuid) => `name-${puuid}`)
+    )
+    expect(payload.allies[0]).not.toHaveProperty('threatScore')
+  })
+
+  it('generates the enemy brief only once per game even if the reaction fires repeatedly', () => {
+    const { context, state, reactions } = createContext()
+    new OngoingGameAiBriefController(context).watch()
+    mockedRequest.mockResolvedValue('敌方简报内容')
+
+    state.queryStage = createQueryStage('in-game')
+    state.situationRead = createSituationRead()
+    drive(reactions)
+    drive(reactions)
+
+    expect(mockedRequest).toHaveBeenCalledTimes(1)
+  })
+
+  it('still generates the enemy brief when the ally brief has settled into the terminal error state', async () => {
+    vi.useFakeTimers()
+
+    try {
+      const { context, state, reactions } = createContext()
+      new OngoingGameAiBriefController(context).watch()
+
+      // 我方简报三次全部失败，进入终态错误；敌方简报随后成功
+      mockedRequest.mockRejectedValueOnce(new DeepSeekRequestError('network', 'boom'))
+      mockedRequest.mockRejectedValueOnce(new DeepSeekRequestError('network', 'boom'))
+      mockedRequest.mockRejectedValueOnce(new DeepSeekRequestError('network', 'boom'))
+      mockedRequest.mockResolvedValue('敌方简报内容')
+
+      enterChampSelect(state)
+      drive(reactions)
+
+      await vi.advanceTimersByTimeAsync(5_000)
+      await vi.advanceTimersByTimeAsync(15_000)
+
+      expect(state.allyBrief).toEqual({ status: 'error', errorType: 'network' })
+
+      // 进游戏：我方终态失败不阻断敌方简报生成
+      enterInGame(state)
+      drive(reactions)
+
+      expect(state.enemyBrief).toEqual({ status: 'loading' })
+
+      await vi.waitFor(() => {
+        expect(state.enemyBrief).toEqual({ status: 'success', content: '敌方简报内容' })
+      })
+      expect(state.allyBrief).toEqual({ status: 'error', errorType: 'network' })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps the retry schedules independent between the two briefs', async () => {
+    vi.useFakeTimers()
+
+    try {
+      const { context, state, reactions } = createContext()
+      new OngoingGameAiBriefController(context).watch()
+      mockedRequest.mockRejectedValue(new DeepSeekRequestError('network', 'boom'))
+
+      enterChampSelect(state)
+      drive(reactions)
+      expect(mockedRequest).toHaveBeenCalledTimes(1)
+
+      enterInGame(state)
+      drive(reactions)
+      expect(mockedRequest).toHaveBeenCalledTimes(2)
+
+      // 5s 后：两份各自完成第一次重试
+      await vi.advanceTimersByTimeAsync(5_000)
+      expect(mockedRequest).toHaveBeenCalledTimes(4)
+
+      // 15s 后：两份各自完成第二次重试并进入终态
+      await vi.advanceTimersByTimeAsync(15_000)
+      expect(mockedRequest).toHaveBeenCalledTimes(6)
+      expect(state.allyBrief).toEqual({ status: 'error', errorType: 'network' })
+      expect(state.enemyBrief).toEqual({ status: 'error', errorType: 'network' })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('clears the enemy brief state on end-of-game and regenerates for the next game', async () => {
+    const { context, state, reactions } = createContext()
+    new OngoingGameAiBriefController(context).watch()
+    mockedRequest.mockResolvedValue('敌方简报内容')
+
+    state.queryStage = createQueryStage('in-game')
+    state.situationRead = createSituationRead()
+    drive(reactions)
+    await vi.waitFor(() => {
+      expect(state.enemyBrief).toEqual({ status: 'success', content: '敌方简报内容' })
+    })
+
+    state.isInEog = true
+    drive(reactions)
+    expect(state.enemyBrief).toBeNull()
+
+    // 下一局：进入游戏重新生成敌方简报
+    state.isInEog = false
+    state.queryStage = createQueryStage('in-game')
+    state.situationRead = createSituationRead()
+    drive(reactions)
+
+    expect(mockedRequest).toHaveBeenCalledTimes(2)
+    expect(state.enemyBrief).toEqual({ status: 'loading' })
   })
 })
