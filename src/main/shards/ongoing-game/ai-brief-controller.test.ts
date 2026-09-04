@@ -514,6 +514,85 @@ describe('OngoingGameAiBriefController game boundary resets', () => {
     expect(mockedRequest).toHaveBeenCalledTimes(2)
     expect(state.allyBrief).toEqual({ status: 'loading' })
   })
+
+  it('regenerates the ally brief for the new team after a dodge', async () => {
+    const { context, state, reactions } = createContext()
+    new OngoingGameAiBriefController(context).watch()
+    mockedRequest.mockResolvedValue('我方简报内容')
+
+    enterChampSelect(state)
+    drive(reactions)
+    await vi.waitFor(() => {
+      expect(state.allyBrief).toEqual({ status: 'success', content: '我方简报内容' })
+    })
+
+    // 选人秒退回大厅：旧简报作废
+    state.queryStage = createQueryStage('lobby')
+    state.situationRead = createSituationRead()
+    drive(reactions)
+    expect(state.allyBrief).toBeNull()
+
+    // 重新排队进入新一局：匹配到四名新队友（新对局、新队伍）
+    const nextGameAllyPuuids = ['self', 'new-ally-2', 'new-ally-3', 'new-ally-4', 'new-ally-5']
+    state.teams = { 'TEAM-100': nextGameAllyPuuids, 'TEAM-200': ENEMY_PUUIDS }
+    state.summoner = {
+      ...state.summoner,
+      ...Object.fromEntries(
+        nextGameAllyPuuids
+          .filter((puuid) => puuid !== 'self')
+          .map((puuid) => [puuid, { gameName: `name-${puuid}`, displayName: `display-${puuid}` }])
+      )
+    }
+    state.situationRead = createSituationRead()
+    state.queryStage = createQueryStage('champ-select')
+    drive(reactions)
+
+    expect(mockedRequest).toHaveBeenCalledTimes(2)
+
+    const messages = mockedRequest.mock.calls[1][0].messages
+    const payload = JSON.parse(messages[1].content)
+
+    expect(payload.players.map((player: { name: string }) => player.name)).toEqual(
+      nextGameAllyPuuids.map((puuid) => `name-${puuid}`)
+    )
+    for (const oldPuuid of ALLY_PUUIDS.slice(1)) {
+      expect(JSON.stringify(payload)).not.toContain(`name-${oldPuuid}`)
+    }
+  })
+
+  it('issues no new request when returning to the lobby after end-of-game', async () => {
+    const { context, state, reactions } = createContext()
+    new OngoingGameAiBriefController(context).watch()
+    mockedRequest.mockResolvedValue('简报内容')
+
+    // 完整对局：选人生成我方简报、进游戏生成敌方简报
+    enterChampSelect(state)
+    drive(reactions)
+    enterInGame(state)
+    drive(reactions)
+    await vi.waitFor(() => {
+      expect(state.enemyBrief).toEqual({ status: 'success', content: '简报内容' })
+    })
+    expect(mockedRequest).toHaveBeenCalledTimes(2)
+
+    // EOG：两份简报清空
+    state.isInEog = true
+    drive(reactions)
+    expect(state.allyBrief).toBeNull()
+    expect(state.enemyBrief).toBeNull()
+
+    // 回大厅：isInEog 复位、queryInLobbyPhase 使大厅研判就绪——
+    // "每局一次"标志此时已清零，若门控失效会再次生成（旧实现的残留路径）
+    state.isInEog = false
+    state.queryStage = createQueryStage('lobby')
+    state.situationRead = createSituationRead()
+    drive(reactions)
+    drive(reactions)
+
+    expect(mockedRequest).toHaveBeenCalledTimes(2)
+    expect(state.allyBrief).toBeNull()
+    expect(state.enemyBrief).toBeNull()
+  })
 })
 
 describe('OngoingGameAiBriefController enemy brief generation', () => {
