@@ -4,6 +4,10 @@ import { OngoingGameAiBriefController } from './ai-brief-controller'
 import type { OngoingGameMainContext } from './context'
 import { DeepSeekRequestError, requestDeepSeekChatCompletion } from './deepseek-client'
 
+vi.mock('@main/native', () => ({
+  magic: () => ''
+}))
+
 vi.mock('./deepseek-client', () => {
   class DeepSeekRequestError extends Error {
     constructor(
@@ -46,6 +50,10 @@ function createSituationRead() {
 }
 
 function createContext(options: { apiKey?: string } = {}) {
+  const champSelect = {
+    session: null as { timer: { phase: string } } | null
+  }
+
   const state = {
     situationRead: null as ReturnType<typeof createSituationRead> | null,
     isInEog: false,
@@ -90,7 +98,8 @@ function createContext(options: { apiKey?: string } = {}) {
     leagueClient: {
       data: {
         summoner: { me: { puuid: 'self' } },
-        gameData: { champions: { 238: { name: '阿卡丽' } } }
+        gameData: { champions: { 238: { name: '阿卡丽' } } },
+        champSelect
       }
     },
     appCommon: { settings: { locale: 'zh-CN' } },
@@ -101,7 +110,7 @@ function createContext(options: { apiKey?: string } = {}) {
     }
   } as unknown as OngoingGameMainContext
 
-  return { context, state, reactions }
+  return { context, state, reactions, champSelect }
 }
 
 /** 手动驱动已注册的 reaction（模拟 MobX 在状态变化后触发 effect） */
@@ -241,6 +250,216 @@ describe('OngoingGameAiBriefController ally brief generation', () => {
 
     expect(state.allyBrief).toEqual({ status: 'success', content: '我方简报内容' })
     expect(mockedRequest).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('OngoingGameAiBriefController ally brief lock update', () => {
+  /**
+   * 模拟选人阶段我方英雄选择状态：championSelections 为 puuid → 英雄，
+   * session.timer.phase 驱动"是否已全员锁定"（BAN_PICK 进行中 / FINALIZATION 已锁定）。
+   */
+  function setChampSelectState(
+    state: ReturnType<typeof createContext>['state'],
+    champSelect: ReturnType<typeof createContext>['champSelect'],
+    allyChampionIds: Record<string, number>,
+    timerPhase: string
+  ) {
+    state.championSelections = { ...allyChampionIds }
+    champSelect.session = { timer: { phase: timerPhase } }
+  }
+
+  it('regenerates the ally brief once when all allies lock in with changed champions', async () => {
+    const { context, state, reactions, champSelect } = createContext()
+    new OngoingGameAiBriefController(context).watch()
+    mockedRequest.mockResolvedValue('我方简报内容')
+
+    // 首版：研判就绪时仅自己选定英雄，其余队友未定
+    setChampSelectState(state, champSelect, { self: 238 }, 'BAN_PICK')
+    enterChampSelect(state)
+    drive(reactions)
+
+    expect(mockedRequest).toHaveBeenCalledTimes(1)
+    await vi.waitFor(() => {
+      expect(state.allyBrief).toEqual({ status: 'success', content: '我方简报内容' })
+    })
+
+    // 我方 5 人全部锁定，且锁定集合与首版输入不同
+    setChampSelectState(
+      state,
+      champSelect,
+      Object.fromEntries(ALLY_PUUIDS.map((puuid, index) => [puuid, 238 + index])),
+      'FINALIZATION'
+    )
+    drive(reactions)
+
+    expect(mockedRequest).toHaveBeenCalledTimes(2)
+    expect(state.allyBrief).toEqual({ status: 'loading' })
+    await vi.waitFor(() => {
+      expect(state.allyBrief).toEqual({ status: 'success', content: '我方简报内容' })
+    })
+  })
+
+  it('does not regenerate when the locked champions already match the first input', async () => {
+    const { context, state, reactions, champSelect } = createContext()
+    new OngoingGameAiBriefController(context).watch()
+    mockedRequest.mockResolvedValue('我方简报内容')
+
+    // 首版：全员已选定（悬停）同一批英雄
+    setChampSelectState(
+      state,
+      champSelect,
+      Object.fromEntries(ALLY_PUUIDS.map((puuid) => [puuid, 238])),
+      'BAN_PICK'
+    )
+    enterChampSelect(state)
+    drive(reactions)
+
+    expect(mockedRequest).toHaveBeenCalledTimes(1)
+    await vi.waitFor(() => {
+      expect(state.allyBrief).toEqual({ status: 'success', content: '我方简报内容' })
+    })
+
+    // 全员锁定后英雄与首版一致：不触发第二次生成
+    champSelect.session = { timer: { phase: 'FINALIZATION' } }
+    drive(reactions)
+
+    expect(mockedRequest).toHaveBeenCalledTimes(1)
+    expect(state.allyBrief).toEqual({ status: 'success', content: '我方简报内容' })
+  })
+
+  it('does not regenerate when all allies were already locked at first generation', () => {
+    const { context, state, reactions, champSelect } = createContext()
+    new OngoingGameAiBriefController(context).watch()
+    mockedRequest.mockResolvedValue('我方简报内容')
+
+    // 首版生成时我方已全员锁定（如重连进确认阶段）
+    setChampSelectState(
+      state,
+      champSelect,
+      Object.fromEntries(ALLY_PUUIDS.map((puuid) => [puuid, 238])),
+      'FINALIZATION'
+    )
+    enterChampSelect(state)
+    drive(reactions)
+
+    expect(mockedRequest).toHaveBeenCalledTimes(1)
+
+    // 确认阶段的状态再次变化（如皮肤选择刷新 session）：不再触发第二次生成
+    champSelect.session = { timer: { phase: 'GAME_STARTING' } }
+    drive(reactions)
+
+    expect(mockedRequest).toHaveBeenCalledTimes(1)
+  })
+
+  it('caps the ally brief at two generations per game', async () => {
+    const { context, state, reactions, champSelect } = createContext()
+    new OngoingGameAiBriefController(context).watch()
+    mockedRequest.mockResolvedValue('我方简报内容')
+
+    setChampSelectState(state, champSelect, { self: 238 }, 'BAN_PICK')
+    enterChampSelect(state)
+    drive(reactions)
+
+    // 锁定后更新（第 2 次，本局上限）
+    setChampSelectState(
+      state,
+      champSelect,
+      Object.fromEntries(ALLY_PUUIDS.map((puuid, index) => [puuid, 238 + index])),
+      'FINALIZATION'
+    )
+    drive(reactions)
+    expect(mockedRequest).toHaveBeenCalledTimes(2)
+    await vi.waitFor(() => {
+      expect(state.allyBrief).toEqual({ status: 'success', content: '我方简报内容' })
+    })
+
+    // 后续英雄变化（如换肤或重开选人前的异常快照）不再触发
+    setChampSelectState(
+      state,
+      champSelect,
+      Object.fromEntries(ALLY_PUUIDS.map((puuid, index) => [puuid, 100 + index])),
+      'GAME_STARTING'
+    )
+    drive(reactions)
+
+    expect(mockedRequest).toHaveBeenCalledTimes(2)
+  })
+
+  it('discards the in-flight first response when the lock update starts', async () => {
+    const { context, state, reactions, champSelect } = createContext()
+    new OngoingGameAiBriefController(context).watch()
+
+    let resolveFirstRequest!: (content: string) => void
+    mockedRequest.mockImplementationOnce(
+      () =>
+        new Promise<string>((resolve) => {
+          resolveFirstRequest = resolve
+        })
+    )
+    mockedRequest.mockResolvedValue('更新后的我方简报')
+
+    setChampSelectState(state, champSelect, { self: 238 }, 'BAN_PICK')
+    enterChampSelect(state)
+    drive(reactions)
+    expect(mockedRequest).toHaveBeenCalledTimes(1)
+
+    // 首版仍在途中即全员锁定且英雄有变：立即发起更新
+    setChampSelectState(
+      state,
+      champSelect,
+      Object.fromEntries(ALLY_PUUIDS.map((puuid, index) => [puuid, 238 + index])),
+      'FINALIZATION'
+    )
+    drive(reactions)
+    expect(state.allyBrief).toEqual({ status: 'loading' })
+
+    // 迟到的首版响应不得覆盖更新结果
+    resolveFirstRequest('过期的首版内容')
+    await vi.waitFor(() => {
+      expect(state.allyBrief).toEqual({ status: 'success', content: '更新后的我方简报' })
+    })
+  })
+
+  it('allows the lock update again in the next game after a dodge', async () => {
+    const { context, state, reactions, champSelect } = createContext()
+    new OngoingGameAiBriefController(context).watch()
+    mockedRequest.mockResolvedValue('我方简报内容')
+
+    // 第一局：首版 + 锁定更新（达到上限）
+    setChampSelectState(state, champSelect, { self: 238 }, 'BAN_PICK')
+    enterChampSelect(state)
+    drive(reactions)
+    setChampSelectState(
+      state,
+      champSelect,
+      Object.fromEntries(ALLY_PUUIDS.map((puuid, index) => [puuid, 238 + index])),
+      'FINALIZATION'
+    )
+    drive(reactions)
+    expect(mockedRequest).toHaveBeenCalledTimes(2)
+
+    // 选人秒退回大厅
+    state.queryStage = createQueryStage('lobby')
+    champSelect.session = null
+    drive(reactions)
+    expect(state.allyBrief).toBeNull()
+
+    // 新一局选人：首版重新生成，锁定后更新同样可用
+    mockedRequest.mockClear()
+    setChampSelectState(state, champSelect, { self: 238 }, 'BAN_PICK')
+    state.situationRead = createSituationRead()
+    state.queryStage = createQueryStage('champ-select')
+    drive(reactions)
+    expect(mockedRequest).toHaveBeenCalledTimes(1)
+
+    setChampSelectState(
+      state,
+      champSelect,
+      Object.fromEntries(ALLY_PUUIDS.map((puuid, index) => [puuid, 55 + index])),
+      'FINALIZATION'
+    )
+    drive(reactions)
+    expect(mockedRequest).toHaveBeenCalledTimes(2)
   })
 })
 

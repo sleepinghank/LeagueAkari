@@ -53,3 +53,12 @@ export function getVisibleChampSelectPuuid(member: ChampSelectTeam, deobfuscatio
 
   return member.puuid
 }
+
+/**
+ * 判定选人是否已全员锁定：ban/pick 全部完成后客户端进入确认阶段
+ * （FINALIZATION）或开局转场（GAME_STARTING），此后每名成员的英雄不再变化。
+ * 悬停（championPickIntent）不算锁定，只有进入这两个阶段才视为锁定完成。
+ */
+export function isChampSelectFinalized(session: ChampSelectSession): boolean {
+  return session.timer.phase === 'FINALIZATION' || session.timer.phase === 'GAME_STARTING'
+}
