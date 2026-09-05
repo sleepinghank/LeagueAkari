@@ -90,11 +90,16 @@ const hasSituationRead = computed(() => {
 })
 
 /**
- * 简报面板仅在对局阶段（选人 / 游戏中）且已配置 API Key、任一份状态存在时出现；
- * 大厅、排队等非对局阶段不显示，未配置 Key 时完全不出现。
+ * 简报面板仅在自己参与的对局阶段（选人 / 游戏中）且已配置 API Key、任一份状态存在时出现；
+ * 大厅、排队、观战等非对局阶段不显示，未配置 Key 时完全不出现。
+ * 观战时 gameflow phase 与真实对局一致，需以 champSelect 会话的 isSpectating 排除。
  * 面板内部上下分区：上=我方简报，下=敌方简报；敌方未生成时不渲染其分区。
  */
 const isInMatchPhase = computed(() => {
+  if (ongoingGame.isSpectating) {
+    return false
+  }
+
   const phase = ongoingGameStore.queryStage.phase
   return phase === 'champ-select' || phase === 'in-game'
 })

@@ -16,7 +16,9 @@ import type { OngoingGameMainContext } from './context'
  * AI 简报生成（两段式）：以查询阶段为门控前提——我方简报仅在选人阶段触发
  * （研判状态就绪 + 已配置 API Key），只评我方 5 人；敌方简报仅在游戏内阶段触发
  * （研判状态就绪 + 已配置 API Key，每局 1 次），评敌方 5 人并对照我方阵容。
- * 大厅、排队、观战等非对局阶段零请求。
+ * 大厅、排队、观战等非对局阶段零请求（观战期间 LCU 的 gameflow phase 仍为
+ * ChampSelect/InProgress，以 champSelect.session.isSpectating 单独排除，
+ * 观战者不在 teams 中、无信息增益，且不消耗"每局一次"标志）。
  * 我方简报的信息完整性补全：首版生成后，我方 5 人全部锁定英雄且锁定集合与首版输入
  * 不同时自动重新生成一次（新版本含英雄玩法维度的完整评估）；首版生成时已全员锁定
  * 或锁定后英雄与首版一致则不额外生成。每局硬上限 2 次生成（首版 + 锁定后更新一次），
@@ -82,6 +84,7 @@ export class OngoingGameAiBriefController {
         state.situationRead != null &&
         !state.isInEog &&
         state.queryStage.phase === 'champ-select' &&
+        !this._isSpectating() &&
         this._isConfigured(),
       (isReady) => {
         if (isReady && !this._allyAttemptedThisGame) {
@@ -115,6 +118,7 @@ export class OngoingGameAiBriefController {
         state.situationRead != null &&
         !state.isInEog &&
         state.queryStage.phase === 'in-game' &&
+        !this._isSpectating() &&
         this._isConfigured(),
       (isReady) => {
         if (isReady && !this._enemyAttemptedThisGame) {
@@ -138,10 +142,22 @@ export class OngoingGameAiBriefController {
     return this._context.settings.aiSituationBriefApiKey.trim() !== ''
   }
 
-  /** 对局阶段（选人 / 游戏中）：两份简报的生成与展示都限定在这两个阶段 */
+  /** 对局阶段（选人 / 游戏中）：两份简报的生成与展示都限定在这两个阶段；观战视为非对局 */
   private _isInMatchPhase() {
+    if (this._isSpectating()) {
+      return false
+    }
+
     const phase = this._context.state.queryStage.phase
     return phase === 'champ-select' || phase === 'in-game'
+  }
+
+  /**
+   * 观战会话：LCU 在整个观战期间保持 champ-select 会话并标记 isSpectating，
+   * gameflow phase 仍为 ChampSelect/InProgress，需单独排除。
+   */
+  private _isSpectating() {
+    return Boolean(this._context.leagueClient.data.champSelect.session?.isSpectating)
   }
 
   /**

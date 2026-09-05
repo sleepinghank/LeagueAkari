@@ -51,7 +51,7 @@ function createSituationRead() {
 
 function createContext(options: { apiKey?: string } = {}) {
   const champSelect = {
-    session: null as { timer: { phase: string } } | null
+    session: null as { timer: { phase: string }; isSpectating?: boolean } | null
   }
 
   const state = {
@@ -592,6 +592,66 @@ describe('OngoingGameAiBriefController game boundary resets', () => {
     expect(mockedRequest).toHaveBeenCalledTimes(2)
     expect(state.allyBrief).toBeNull()
     expect(state.enemyBrief).toBeNull()
+  })
+})
+
+describe('OngoingGameAiBriefController spectating sessions', () => {
+  /**
+   * 观战会话：LCU 保持 champ-select 会话并标记 isSpectating，
+   * gameflow phase 与真实对局一致（选人 / 游戏内），但观战者不在 teams 中。
+   */
+  function enterSpectating(
+    state: ReturnType<typeof createContext>['state'],
+    champSelect: ReturnType<typeof createContext>['champSelect'],
+    phase: 'champ-select' | 'in-game'
+  ) {
+    state.queryStage = createQueryStage(phase)
+    state.situationRead = createSituationRead()
+    champSelect.session = { timer: { phase: 'BAN_PICK' }, isSpectating: true }
+  }
+
+  it('issues no LLM request while spectating a champ-select', () => {
+    const { context, state, reactions, champSelect } = createContext()
+    new OngoingGameAiBriefController(context).watch()
+
+    enterSpectating(state, champSelect, 'champ-select')
+    drive(reactions)
+
+    expect(mockedRequest).not.toHaveBeenCalled()
+    expect(state.allyBrief).toBeNull()
+    expect(state.enemyBrief).toBeNull()
+  })
+
+  it('issues no LLM request while spectating an in-progress game', () => {
+    const { context, state, reactions, champSelect } = createContext()
+    new OngoingGameAiBriefController(context).watch()
+
+    enterSpectating(state, champSelect, 'in-game')
+    drive(reactions)
+
+    expect(mockedRequest).not.toHaveBeenCalled()
+    expect(state.allyBrief).toBeNull()
+    expect(state.enemyBrief).toBeNull()
+  })
+
+  it('does not consume the once-per-game attempt while spectating', () => {
+    const { context, state, reactions, champSelect } = createContext()
+    new OngoingGameAiBriefController(context).watch()
+    mockedRequest.mockResolvedValue('我方简报内容')
+
+    // 观战他人的选人：零请求
+    enterSpectating(state, champSelect, 'champ-select')
+    drive(reactions)
+    expect(mockedRequest).not.toHaveBeenCalled()
+
+    // 观战结束，随后进入自己的对局选人：首版照常生成
+    champSelect.session = { timer: { phase: 'BAN_PICK' } }
+    state.queryStage = createQueryStage('champ-select')
+    state.situationRead = createSituationRead()
+    drive(reactions)
+
+    expect(mockedRequest).toHaveBeenCalledTimes(1)
+    expect(state.allyBrief).toEqual({ status: 'loading' })
   })
 })
 
